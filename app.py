@@ -63,7 +63,6 @@ document.getElementById('photo').onchange = function(e){
     reader.readAsDataURL(file);
 }
 function fitImage(){
-    const area = document.querySelector('.crop-area');
     const ratio = Math.max(200/cropImg.naturalWidth, 200/cropImg.naturalHeight);
     scale = ratio; updateTransform();
 }
@@ -91,7 +90,7 @@ function saveCrop(){
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
@@ -218,7 +217,7 @@ def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_
 @app.route('/api/contacts')
 def api_contacts(): 
     code,user,db=get_user()
-    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{}) # CORRIGE ICI
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})
 
 @app.route('/ajouter', methods=['POST'])
 def ajouter(): 
