@@ -68,7 +68,7 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>😈 GenieChat</h2>
+<div class="box"><h2>🙋 GenieChat</h2>
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
