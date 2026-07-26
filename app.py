@@ -20,11 +20,6 @@ def load_db():
 def save_db(db):
     with open(DB_FILE, "w") as f: json.dump(db, f)
 
-db = load_db()
-USERS = db["USERS"]
-MESSAGES = db["MESSAGES"]
-UNREAD = db.get("UNREAD", {})
-
 def gen_code_port():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
 
@@ -133,14 +128,16 @@ function saveCrop(){
 SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Paramètres</title><style>{{ CSS }}</style></head><body>
 <div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Profil</h2><div></div></div>
-<div class="box"><form method="POST" action="/update_profile" enctype="multipart/form-data">
+<div class="box">
+<label>TON CODE:</label><div class="code-info">{{ code }}</div> <!-- NOUVEAU: CODE VISIBLE -->
+<form method="POST" action="/update_profile" enctype="multipart/form-data">
 <div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
 <label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
 <input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
 <div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
 <button class="btn">Enregistrer</button>
 </form></div>
-<script> /* même script crop que au dessus */
+<script> /* même script crop */
 let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
 document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
 document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
@@ -230,25 +227,20 @@ function addMsg(from,msg,me,time,status,id,type='text'){
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
-
-// CORRIGÉ: On écoute TOUS les messages même hors du chat
 socket.on('receive_message',d=>{
-    if(d.from==AMI_CODE){
-        addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
-    } else {
-        // Si c'est pas le chat ouvert, on recharge les contacts pour voir la boule verte
-        fetch('/contacts').then(()=>{});
-    }
+    if(d.from==AMI_CODE){addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();}
+    else{location.reload();} // Recharge pour voir la boule verte
 });
 </script></body></html>"""
 
 def get_user():
     code = session.get('code')
-    return code, USERS.get(code)
+    db = load_db() # FORCER CHARGEMENT DB A CHAQUE FOIS
+    return code, db["USERS"].get(code), db
 
 @app.route('/')
 def login():
-    code, user = get_user()
+    code, user, db = get_user()
     if user:
         return render_template_string(LOGIN_HTML, CSS=CSS, code=code, nom=user['nom'])
     return render_template_string(LOGIN_HTML, CSS=CSS, code=None, nom=None)
@@ -257,6 +249,7 @@ def login():
 def register():
     if request.method == 'GET':
         return render_template_string(REGISTER_HTML, CSS=CSS)
+    db = load_db()
     nom = request.form['nom']
     code = gen_code_port()
     photo = ""
@@ -269,28 +262,29 @@ def register():
             buf = BytesIO(); img.save(buf, format="PNG")
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
-    USERS[code] = {"nom": nom, "photo": photo, "contacts": []}
-    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
+    db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
+    save_db(db)
     session['code'] = code
     return redirect('/')
 
 @app.route('/login', methods=['POST'])
 def do_login():
+    db = load_db()
     code = request.form['code'].upper()
-    if code in USERS:
+    if code in db["USERS"]:
         session['code'] = code
         return redirect('/')
     return "Code introuvable", 404
 
 @app.route('/settings')
 def settings():
-    code, user = get_user()
+    code, user, db = get_user()
     if not code: return redirect('/')
-    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'])
+    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code) # CODE AJOUTE
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
-    code, user = get_user()
+    code, user, db = get_user()
     if not code: return redirect('/')
     user['nom'] = request.form['nom']
     if request.form.get('original_img'):
@@ -302,7 +296,8 @@ def update_profile():
             buf = BytesIO(); img.save(buf, format="PNG")
             user['photo'] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
-    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
+    db["USERS"][code] = user
+    save_db(db)
     return redirect('/settings')
 
 @app.route('/logout')
@@ -312,52 +307,54 @@ def logout():
 
 @app.route('/contacts')
 def contacts():
-    code, user = get_user()
+    code, user, db = get_user()
     if not code: return redirect('/')
-    user_unread = UNREAD.get(code, {})
-    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=USERS, contacts=user['contacts'], unread=user_unread)
+    user_unread = db["UNREAD"].get(code, {})
+    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=user['contacts'], unread=user_unread)
 
 @app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
-    code, user = get_user()
+    code, user, db = get_user()
     if not code: return redirect('/')
     if request.method == 'GET': return redirect('/contacts')
     code_ami = request.form['code_ami'].upper().strip()
-    if code_ami in USERS:
+    if code_ami in db["USERS"]:
         if code_ami not in user['contacts']: user['contacts'].append(code_ami)
-        if code not in USERS[code_ami]['contacts']: USERS[code_ami]['contacts'].append(code)
-        save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
+        if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
+        db["USERS"][code] = user
+        save_db(db)
         return redirect(f'/chat/{code_ami}')
     else: return "Code introuvable", 404
 
 @app.route('/chat/<code_ami>')
 def chat(code_ami):
-    code, user = get_user()
+    code, user, db = get_user()
     if not code: return redirect('/')
-    if code in UNREAD and code_ami in UNREAD[code]:
-        UNREAD[code][code_ami] = 0
-        save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
-    ami = USERS.get(code_ami)
+    if code in db["UNREAD"] and code_ami in db["UNREAD"][code]:
+        db["UNREAD"][code][code_ami] = 0
+        save_db(db)
+    ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
     return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
 
 @app.route('/get_msg/<ami>')
 def get_msg(ami):
-    code, _ = get_user()
+    code, _, db = get_user()
     cle = "-".join(sorted([code, ami]))
-    return jsonify(MESSAGES.get(cle, []))
+    return jsonify(db["MESSAGES"].get(cle, []))
 
 @socketio.on('receive_message')
 def receive(data):
+    db = load_db() # CHARGER DB AVANT D'ECRIRE
     cle = "-".join(sorted([data['to'], data['from']]))
-    if cle not in MESSAGES: MESSAGES[cle] = []
-    MESSAGES[cle].append(data)
+    if cle not in db["MESSAGES"]: db["MESSAGES"][cle] = []
+    db["MESSAGES"][cle].append(data)
     dest = data['to']
     src = data['from']
-    if dest not in UNREAD: UNREAD[dest] = {}
-    if src not in UNREAD[dest]: UNREAD[dest][src] = 0
-    UNREAD[dest][src] += 1
-    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD}) # SAUVEGARDE IMMÉDIATE
+    if dest not in db["UNREAD"]: db["UNREAD"][dest] = {}
+    if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
+    db["UNREAD"][dest][src] += 1
+    save_db(db) # SAUVEGARDE FORCÉE
 
 if __name__=='__main__':
     socketio.run(app,host='0.0.0.0',port=10000)
