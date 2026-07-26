@@ -1,4 +1,6 @@
 Flask==2.3.3
 Flask-SocketIO==5.3.6
 python-socketio==5.11.2
+Pillow==9.5.0
 gunicorn==21.2.0
+eventlet==0.33.3
