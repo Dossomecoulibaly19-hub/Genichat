@@ -179,7 +179,7 @@ def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_
 @app.route('/api/contacts')
 def api_contacts(): 
     code,user,db=get_user()
-    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})}) # CORRIGE ICI: ) ajouté
 
 @app.route('/ajouter', methods=['POST'])
 def ajouter(): 
