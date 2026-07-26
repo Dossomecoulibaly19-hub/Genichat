@@ -47,7 +47,7 @@ body {background:#111B21; color:#E9EDEF;}.header {background:#202C33; padding:12
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
@@ -154,7 +154,8 @@ def get_user():
     code = session.get('code'); db = load_db()
     return code, db["USERS"].get(code), db
 
-@app.route('/');@app.route('/login', methods=['GET','POST'])
+@app.route('/')
+@app.route('/login', methods=['GET','POST'])
 def login():
     if request.method=='POST':
         db=load_db(); code=request.form['code'].upper();
@@ -170,7 +171,10 @@ def register():
         img=Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1]))).resize((150,150)); buf=BytesIO(); img.save(buf,format="PNG"); photo="data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
     db["USERS"][code]={"nom":nom,"photo":photo,"contacts":[]}; save_db(db); session['code']=code; return redirect('/')
 
-@app.route('/settings');def settings(): code,user,db=get_user(); return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code)
+@app.route('/settings')
+def settings():
+    code,user,db=get_user();
+    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code)
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
@@ -179,31 +183,55 @@ def update_profile():
         img=Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1]))).resize((150,150)); buf=BytesIO(); img.save(buf,format="PNG"); user['photo']="data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
     db["USERS"][code]=user; save_db(db); return redirect('/settings')
 
-@app.route('/logout');def logout(): session.pop('code',None); return redirect('/')
-@app.route('/contacts');def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_HTML, CSS=CSS, photo=user['photo'], my_code=code, central=CENTRAL_SERVER)
-@app.route('/api/contacts');def api_contacts(): code,user,db=get_user(); return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})})
+@app.route('/logout')
+def logout():
+    session.pop('code',None);
+    return redirect('/')
+
+@app.route('/contacts')
+def contacts():
+    code,user,db=get_user();
+    return render_template_string(CONTACTS_HTML, CSS=CSS, photo=user['photo'], my_code=code, central=CENTRAL_SERVER)
+
+@app.route('/api/contacts')
+def api_contacts():
+    code,user,db=get_user();
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})})
+
 @app.route('/ajouter', methods=['POST'])
-def ajouter(): code,user,db=get_user(); code_ami=request.form['code_ami'].upper();
-if code_ami in db["USERS"]:
-    if code_ami not in user['contacts']: user['contacts'].append(code_ami)
-    if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
-    db["USERS"][code]=user; save_db(db)
-return redirect(f'/chat/{code_ami}')
+def ajouter():
+    code,user,db=get_user(); code_ami=request.form['code_ami'].upper()
+    if code_ami in db["USERS"]:
+        if code_ami not in user['contacts']: user['contacts'].append(code_ami)
+        if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
+        db["USERS"][code]=user; save_db(db)
+    return redirect(f'/chat/{code_ami}')
 
-@app.route('/chat/<code_ami>');def chat(code_ami): code,user,db=get_user(); ami=db["USERS"].get(code_ami);
-if code in db["UNREAD"] and code_ami in db["UNREAD"][code]: db["UNREAD"][code][code_ami]=0; save_db(db)
-return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
+@app.route('/chat/<code_ami>')
+def chat(code_ami):
+    code,user,db=get_user(); ami=db["USERS"].get(code_ami)
+    if code in db["UNREAD"] and code_ami in db["UNREAD"][code]: db["UNREAD"][code][code_ami]=0; save_db(db)
+    return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
 
-@app.route('/get_msg/<ami>');def get_msg(ami): code,_,db=get_user(); cle="-".join(sorted([code,ami])); return jsonify(db["MESSAGES"].get(cle,[]))
+@app.route('/get_msg/<ami>')
+def get_msg(ami):
+    code,_,db=get_user(); cle="-".join(sorted([code,ami]));
+    return jsonify(db["MESSAGES"].get(cle,[]))
 
-@socketio.on('join');def on_join(data): join_room(data['code'])
-@socketio.on('send_message');def handle_send(data):
+@socketio.on('join')
+def on_join(data):
+    join_room(data['code'])
+
+@socketio.on('send_message')
+def handle_send(data):
     db=load_db(); cle="-".join(sorted([data['to'],data['from']]))
     if cle not in db["MESSAGES"]: db["MESSAGES"][cle]=[]
     db["MESSAGES"][cle].append(data)
     if data['to'] not in db["UNREAD"]: db["UNREAD"][data['to']]={}
     db["UNREAD"][data['to']][data['from']]=db["UNREAD"][data['to']].get(data['from'],0)+1
     save_db(db)
-    emit('receive_message',data,room=data['to']); emit('new_message_alert',{},room=data['to'])
+    emit('receive_message',data,room=data['to']);
+    emit('new_message_alert',{},room=data['to'])
 
-if __name__=='__main__': socketio.run(app,host='0.0.0.0',port=10000)
+if __name__=='__main__':
+    socketio.run(app,host='0.0.0.0',port=int(os.environ.get("PORT", 10000)))
