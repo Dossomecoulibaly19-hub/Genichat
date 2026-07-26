@@ -4,7 +4,7 @@ import json, os, base64, random, string
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet') # MODIF 1
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
@@ -42,10 +42,11 @@ body {background:#111B21; color:#E9EDEF;}.header {background:#202C33; padding:12
 .crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0,0.8); pointer-events:none;}
 .crop-img {position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);}
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
+.add-bar {padding:10px; background:#202C33; display:flex;}
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
@@ -158,7 +159,7 @@ def login():
 @app.route('/register', methods=['GET','POST'])
 def register():
     if request.method=='GET': return render_template_string(REGISTER_HTML, CSS=CSS)
-    db=load_db(); nom=request.form['nom']; code=gen_code_port(); photo=request.form.get('photo_data',"") # MODIF 2
+    db=load_db(); nom=request.form['nom']; code=gen_code_port(); photo=request.form.get('photo_data',"")
     db["USERS"][code]={"nom":nom,"photo":photo,"contacts":[]}; save_db(db); session['code']=code; return redirect('/')
 
 @app.route('/settings')
@@ -166,17 +167,23 @@ def settings(): code,user,db=get_user(); return render_template_string(SETTINGS_
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
-    code,user,db=get_user(); user['nom']=request.form['nom']; user['photo']=request.form.get('photo_data',user['photo']) # MODIF 3
+    code,user,db=get_user(); user['nom']=request.form['nom']; user['photo']=request.form.get('photo_data',user['photo'])
     db["USERS"][code]=user; save_db(db); return redirect('/settings')
 
 @app.route('/logout')
 def logout(): session.pop('code',None); return redirect('/')
+
 @app.route('/contacts')
 def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_HTML, CSS=CSS, photo=user['photo'], nom=user['nom'], my_code=code, central=CENTRAL_SERVER)
+
 @app.route('/api/contacts')
-def api_contacts(): code,user,db=get_user(); return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})
+def api_contacts(): 
+    code,user,db=get_user()
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})
+
 @app.route('/ajouter', methods=['POST'])
-def ajouter(): code,user,db=get_user(); code_ami=request.form['code_ami'].upper();
+def ajouter(): 
+    code,user,db=get_user(); code_ami=request.form['code_ami'].upper();
     if code_ami in db["USERS"]:
         if code_ami not in user['contacts']: user['contacts'].append(code_ami)
         if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
@@ -184,7 +191,8 @@ def ajouter(): code,user,db=get_user(); code_ami=request.form['code_ami'].upper(
     return redirect(f'/chat/{code_ami}')
 
 @app.route('/chat/<code_ami>')
-def chat(code_ami): code,user,db=get_user(); ami=db["USERS"].get(code_ami);
+def chat(code_ami): 
+    code,user,db=get_user(); ami=db["USERS"].get(code_ami);
     if code in db["UNREAD"] and code_ami in db["UNREAD"][code]: db["UNREAD"][code][code_ami]=0; save_db(db)
     return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
 
@@ -193,6 +201,7 @@ def get_msg(ami): code,_,db=get_user(); cle="-".join(sorted([code,ami])); return
 
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
+
 @socketio.on('send_message')
 def handle_send(data):
     db=load_db(); cle="-".join(sorted([data['to'],data['from']]))
@@ -203,4 +212,5 @@ def handle_send(data):
     save_db(db)
     emit('receive_message',data,room=data['to']); emit('new_message_alert',{},room=data['to'])
 
-if __name__=='__main__': socketio.run(app,host='0.0.0.0',port=int(os.environ.get("PORT", 10000)), allow_unsafe_werkzeug=True) # MODIF 4
+if __name__=='__main__': 
+    socketio.run(app,host='0.0.0.0',port=int(os.environ.get("PORT", 10000)), allow_unsafe_werkzeug=True)
