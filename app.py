@@ -4,7 +4,7 @@ import json, os, base64, random, string
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent') # MODIF ICI
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
@@ -46,7 +46,7 @@ body {background:#111B21; color:#E9EDEF;}.header {background:#202C33; padding:12
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
@@ -179,7 +179,7 @@ def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_
 @app.route('/api/contacts')
 def api_contacts(): 
     code,user,db=get_user()
-    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})}) # CORRIGE ICI: ) ajouté
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})})
 
 @app.route('/ajouter', methods=['POST'])
 def ajouter(): 
