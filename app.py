@@ -4,7 +4,7 @@ import json, os, base64, random, string
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent') # MODIF ICI
+socketio = SocketIO(app, cors_allowed_origins="*") # PLUS DE async_mode
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
