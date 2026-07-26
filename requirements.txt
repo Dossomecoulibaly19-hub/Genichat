@@ -1,5 +1,5 @@
 Flask==2.3.3
 Flask-SocketIO==5.3.6
 python-socketio==5.11.2
-Pillow==10.2.0
+Pillow==10.0.1
 gunicorn==21.2.0
