@@ -1,5 +1,5 @@
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
-from flask_socketio import SocketIO, emit
+from flask_socketio import SocketIO, emit, join_room, leave_room
 import json, os, base64, time, random, string
 from datetime import datetime
 from io import BytesIO
@@ -18,7 +18,7 @@ def load_db():
     return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}}
 
 def save_db(db):
-    with open(DB_FILE, "w") as f: json.dump(db, f)
+    with open(DB_FILE, "w") as f: json.dump(db, f, indent=2)
 
 def gen_code_port():
     return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
@@ -33,7 +33,7 @@ body {background:#111B21; color:#E9EDEF;}
 .avatar {width:40px; height:40px; border-radius:50%; background:#00A884; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; background-position:center; color:white; position:relative; cursor:pointer;}
 .avatar-big {width:150px; height:150px; border-radius:50%; margin:0 auto 20px; display:flex; align-items:center; justify-content:center; background:#2A3942; font-size:60px; font-weight:bold; border:4px solid #00A884; background-size:cover; background-position:center;}
 .box {background:#202C33; padding:25px; border-radius:20px; max-width:450px; margin:30px auto; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.3);}
-.code-info {padding:14px; background:#000; font-size:20px; color:#00A884; border-radius:10px; text-align:center; letter-spacing:4px; font-weight:bold; margin:10px 0;}
+.code-info {padding:14px; background:#000; font-size:20px; color:#00A884; border-radius:10px; text-align:center; letter-spacing:4px; font-weight:bold; margin:10px 0; user-select:all;}
 .contact-list {flex:1; overflow-y:auto;}
 .contact{padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer; border-bottom:1px solid #2A3942; position:relative;}
 .contact:hover{background:#2A3942;}
@@ -94,9 +94,8 @@ REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button>
 <button type="button" class="btn" onclick="saveCrop()">Valider</button></div></div>
 <script>
-let scale=1,posX=0,posY=0,isDragging=false,startX,startY;
-let cropImg = document.getElementById('cropImg');
-let preview = document.getElementById('preview');
+let scale=1,posX=0,posY=0,isDragging=false;
+let cropImg = document.getElementById('cropImg'); let preview = document.getElementById('preview');
 document.getElementById('photo').onchange = function(e){
     const file=e.target.files[0]; if(!file) return;
     const reader=new FileReader();
@@ -109,10 +108,9 @@ document.getElementById('photo').onchange = function(e){
     reader.readAsDataURL(file);
 }
 function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
-function getPointerPos(e){ if(e.touches) return {x:e.touches[0].clientX, y:e.touches[0].clientY}; return {x:e.clientX, y:e.clientY}; }
-cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = getPointerPos(e); startX = pos.x - posX; startY = pos.y - posY; cropImg.style.cursor = 'grabbing'; })
-document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = getPointerPos(e); posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
-document.addEventListener('pointerup', ()=>{ isDragging=false; cropImg.style.cursor = 'grab'; })
+cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; startX = pos.x - posX; startY = pos.y - posY; })
+document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
+document.addEventListener('pointerup', ()=>{ isDragging=false; })
 function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
 function closeCrop(){document.getElementById('cropModal').style.display='none';}
 function saveCrop(){
@@ -129,7 +127,7 @@ SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <title>Paramètres</title><style>{{ CSS }}</style></head><body>
 <div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Profil</h2><div></div></div>
 <div class="box">
-<label>TON CODE:</label><div class="code-info">{{ code }}</div> <!-- NOUVEAU: CODE VISIBLE -->
+<label>TON CODE:</label><div class="code-info" onclick="navigator.clipboard.writeText('{{ code }}')"> {{ code }} </div><small style="color:#8696A0;">Clique pour copier</small>
 <form method="POST" action="/update_profile" enctype="multipart/form-data">
 <div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
 <label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
@@ -137,7 +135,7 @@ SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
 <button class="btn">Enregistrer</button>
 </form></div>
-<script> /* même script crop */
+<script>
 let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
 document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
 document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
@@ -163,6 +161,11 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>{% endfor %}</div>
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;">
 <input name="code_ami" placeholder="Entrer CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
+<script>
+// MINI SERVEUR: Ecoute en permanence les nouveaux messages
+const socket=io("{{ central }}"); socket.emit('join',{code:"{{ my_code }}"});
+socket.on('new_message_alert', ()=>{ location.reload(); }); // Recharge si nouveau message
+</script>
 </body></html>"""
 
 CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -229,30 +232,25 @@ function addMsg(from,msg,me,time,status,id,type='text'){
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
 socket.on('receive_message',d=>{
     if(d.from==AMI_CODE){addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();}
-    else{location.reload();} // Recharge pour voir la boule verte
 });
 </script></body></html>"""
 
 def get_user():
     code = session.get('code')
-    db = load_db() # FORCER CHARGEMENT DB A CHAQUE FOIS
+    db = load_db()
     return code, db["USERS"].get(code), db
 
 @app.route('/')
 def login():
     code, user, db = get_user()
-    if user:
-        return render_template_string(LOGIN_HTML, CSS=CSS, code=code, nom=user['nom'])
+    if user: return render_template_string(LOGIN_HTML, CSS=CSS, code=code, nom=user['nom'])
     return render_template_string(LOGIN_HTML, CSS=CSS, code=None, nom=None)
 
 @app.route('/register', methods=['GET','POST'])
 def register():
-    if request.method == 'GET':
-        return render_template_string(REGISTER_HTML, CSS=CSS)
+    if request.method == 'GET': return render_template_string(REGISTER_HTML, CSS=CSS)
     db = load_db()
-    nom = request.form['nom']
-    code = gen_code_port()
-    photo = ""
+    nom = request.form['nom']; code = gen_code_port(); photo = ""
     if request.form.get('original_img'):
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
@@ -263,31 +261,26 @@ def register():
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
-    save_db(db)
-    session['code'] = code
-    return redirect('/')
+    save_db(db); session['code'] = code; return redirect('/')
 
 @app.route('/login', methods=['POST'])
 def do_login():
-    db = load_db()
-    code = request.form['code'].upper()
-    if code in db["USERS"]:
-        session['code'] = code
-        return redirect('/')
+    db = load_db(); code = request.form['code'].upper()
+    if code in db["USERS"]: session['code'] = code; return redirect('/')
     return "Code introuvable", 404
 
 @app.route('/settings')
 def settings():
     code, user, db = get_user()
     if not code: return redirect('/')
-    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code) # CODE AJOUTE
+    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code)
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     code, user, db = get_user()
     if not code: return redirect('/')
     user['nom'] = request.form['nom']
-    if request.form.get('original_img'):
+    if request.form.get('original_img') and request.form.get('original_img')!= "":
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
             img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
@@ -295,22 +288,18 @@ def update_profile():
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
             user['photo'] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        except: pass
-    db["USERS"][code] = user
-    save_db(db)
-    return redirect('/settings')
+        except Exception as e: print("Crop error:", e)
+    db["USERS"][code] = user; save_db(db); return redirect('/settings')
 
 @app.route('/logout')
-def logout():
-    session.pop('code', None)
-    return redirect('/')
+def logout(): session.pop('code', None); return redirect('/')
 
 @app.route('/contacts')
 def contacts():
     code, user, db = get_user()
     if not code: return redirect('/')
     user_unread = db["UNREAD"].get(code, {})
-    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=user['contacts'], unread=user_unread)
+    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=user['contacts'], unread=user_unread, my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
@@ -321,9 +310,7 @@ def ajouter():
     if code_ami in db["USERS"]:
         if code_ami not in user['contacts']: user['contacts'].append(code_ami)
         if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
-        db["USERS"][code] = user
-        save_db(db)
-        return redirect(f'/chat/{code_ami}')
+        db["USERS"][code] = user; save_db(db); return redirect(f'/chat/{code_ami}')
     else: return "Code introuvable", 404
 
 @app.route('/chat/<code_ami>')
@@ -331,8 +318,7 @@ def chat(code_ami):
     code, user, db = get_user()
     if not code: return redirect('/')
     if code in db["UNREAD"] and code_ami in db["UNREAD"][code]:
-        db["UNREAD"][code][code_ami] = 0
-        save_db(db)
+        db["UNREAD"][code][code_ami] = 0; save_db(db)
     ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
     return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
@@ -343,18 +329,27 @@ def get_msg(ami):
     cle = "-".join(sorted([code, ami]))
     return jsonify(db["MESSAGES"].get(cle, []))
 
-@socketio.on('receive_message')
-def receive(data):
-    db = load_db() # CHARGER DB AVANT D'ECRIRE
+@socketio.on('join')
+def on_join(data): join_room(data['code'])
+
+@socketio.on('send_message')
+def handle_send(data):
+    db = load_db()
     cle = "-".join(sorted([data['to'], data['from']]))
     if cle not in db["MESSAGES"]: db["MESSAGES"][cle] = []
     db["MESSAGES"][cle].append(data)
+
     dest = data['to']
     src = data['from']
     if dest not in db["UNREAD"]: db["UNREAD"][dest] = {}
     if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
     db["UNREAD"][dest][src] += 1
-    save_db(db) # SAUVEGARDE FORCÉE
+
+    save_db(db) # STOCKAGE IMMEDIAT SUR DISQUE
+
+    # ENVOYER AU DESTINATAIRE MEME S'IL N'EST PAS DANS LE CHAT
+    emit('receive_message', data, room=dest)
+    emit('new_message_alert', {}, room=dest) # ALERTE POUR RECHARGER CONTACTS
 
 if __name__=='__main__':
     socketio.run(app,host='0.0.0.0',port=10000)
