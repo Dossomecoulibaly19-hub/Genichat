@@ -2,7 +2,7 @@ from flask import Flask, render_template_string, request, redirect, session, jso
 from flask_socketio import SocketIO, emit, join_room
 import json, os, base64, random, string
 from io import BytesIO
-from PIL import Image
+# from PIL import Image # DESACTIVE POUR RENDER
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
@@ -47,7 +47,7 @@ body {background:#111B21; color:#E9EDEF;}.header {background:#202C33; padding:12
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
@@ -57,52 +57,22 @@ LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=
 
 REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Créer Compte</title><style>{{ CSS }}</style></head><body>
 <div class="box"><h2>Créer ton Compte</h2>
-<form method="POST" action="/register" enctype="multipart/form-data">
+<form method="POST" action="/register">
 <div id="preview" class="avatar-big">{{ '' }}</div>
-<label for="photo" class="btn btn-gray">📷 Choisir Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
-<input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
 <div class="form-group"><label>Nom</label><input name="nom" class="input" required></div><button class="btn">Créer</button>
-</form><a href="/" class="btn btn-gray">Déjà un compte?</a></div>
-<div id="cropModal" class="crop-modal"><div class="crop-area"><img id="cropImg" class="crop-img"><div class="crop-circle"></div></div>
-<div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div></div>
-<script>
-let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.getElementById('cropImg'); let preview = document.getElementById('preview');
-document.getElementById('photo').onchange = function(e){const file=e.target.files[0]; if(!file) return;const reader=new FileReader();reader.onload=function(ev){cropImg.src = ev.target.result;document.getElementById('original_img').value = ev.target.result;document.getElementById('cropModal').style.display='flex';scale=0.8; posX=0; posY=0; updateTransform();}reader.readAsDataURL(file);}
-function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
-cropImg.onpointerdown = e=>{isDragging=true; startX = e.clientX - posX; startY = e.clientY - posY;}
-document.onpointermove = e=>{if(!isDragging) return; posX = e.clientX - startX; posY = e.clientY - startY; updateTransform();}
-document.onpointerup = ()=>{isDragging=false;}
-function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
-function closeCrop(){document.getElementById('cropModal').style.display='none';}
-function saveCrop(){document.getElementById('crop_x').value=posX;document.getElementById('crop_y').value=posY;document.getElementById('crop_scale').value=scale;preview.style.backgroundImage = `url(${cropImg.src})`;preview.innerHTML = '';closeCrop();}
-</script></body></html>"""
+</form><a href="/" class="btn btn-gray">Déjà un compte?</a></div></body></html>"""
 
 SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Paramètres</title><style>{{ CSS }}</style></head><body>
 <div class="header"><a href="/contacts" style="font-size:24px;">←</a><h2>Profil</h2><div></div></div>
 <div class="box">
 <label>TON CODE:</label><div class="code-info">{{ code }}</div>
-<form method="POST" action="/update_profile" enctype="multipart/form-data">
-<div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
-<label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
-<input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
+<form method="POST" action="/update_profile">
+<div id="preview" class="avatar-big">{{ nom[0]|upper }}</div>
 <div class="form-group"><label>Nom</label><input name="nom" value="{{ nom }}" class="input" required></div><button class="btn">Enregistrer</button>
-</form></div>
-<script>let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
-document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
-document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
-document.querySelector('.crop-area').appendChild(cropImg);document.querySelector('.crop-area').appendChild(document.createElement('div')).className='crop-circle';
-document.getElementById('photo').onchange = function(e){const file=e.target.files[0]; if(!file) return;const reader=new FileReader();reader.onload=function(ev){cropImg.src = ev.target.result;document.getElementById('original_img').value = ev.target.result;document.getElementById('cropModal').style.display='flex';scale=0.8; posX=0; posY=0; updateTransform();}reader.readAsDataURL(file);}
-function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
-cropImg.onpointerdown = e=>{isDragging=true; startX = e.clientX - posX; startY = e.clientY - posY;}
-document.onpointermove = e=>{if(!isDragging) return; posX = e.clientX - startX; posY = e.clientY - startY; updateTransform();}
-document.onpointerup = ()=>{isDragging=false;}
-function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
-function closeCrop(){document.getElementById('cropModal').style.display='none';}
-function saveCrop(){document.getElementById('crop_x').value=posX;document.getElementById('crop_y').value=posY;document.getElementById('crop_scale').value=scale;document.getElementById('preview').style.backgroundImage = `url(${cropImg.src})`;document.getElementById('preview').innerHTML = '';closeCrop();}
-</script></body></html>"""
+</form></div></body></html>"""
 
 CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Chats</title><style>{{ CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
-<div class="header"><h2>Chats</h2><a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a></div>
+<div class="header"><h2>Chats</h2><a href="/settings"><div class="avatar">{{ nom[0]|upper }}</div></a></div>
 <div class="contact-list" id="contact-list"></div>
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;"><input name="code_ami" placeholder="CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
 <script>
@@ -111,7 +81,7 @@ socket.emit('join',{code:MY_CODE});
 function renderContacts(data){
     let html=''; for(let c of data.contacts){
         html+=`<div class="contact" onclick="location='/chat/${c}'">
-        <div class="avatar" style="background-image:url('${data.users[c].photo}')">${data.users[c].photo?'':data.users[c].nom[0]}</div>
+        <div class="avatar">${data.users[c].nom[0]}</div>
         <div><b>${data.users[c].nom}</b><br><small>${c}</small></div>
         ${data.unread[c]>0?`<div class="badge">${data.unread[c]}</div>`:''}
         </div>`
@@ -122,7 +92,7 @@ socket.on('new_message_alert', ()=>fetch('/api/contacts').then(r=>r.json()).then
 </script></body></html>"""
 
 CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Chat</title><style>{{ CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
-<div class="header"><a href="/contacts" style="font-size:24px;">←</a><div class="avatar" style="background-image:url('{{ ami.photo }}')">{{ '' if ami.photo else ami.nom[0]|upper }}</div><div><b>{{ ami.nom }}</b><br><small>{{ code_ami }}</small></div></div>
+<div class="header"><a href="/contacts" style="font-size:24px;">←</a><div class="avatar">{{ ami.nom[0]|upper }}</div><div><b>{{ ami.nom }}</b><br><small>{{ code_ami }}</small></div></div>
 <div class="messages" id="msgBox"></div>
 <form class="send-box" id="sendForm"><input type="text" id="message" placeholder="Écris un message" class="input"><button class="btn" style="border-radius:50%; width:48px; height:48px; padding:0;">➤</button></form>
 <script>
@@ -133,10 +103,10 @@ function saveLocal(msgs){localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs))
 function loadLocal(){return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');}
 function addMsg(m,me){let d=document.createElement('div');d.className='msg '+(me?'me':'you');d.innerHTML=`${m.msg}<div class="time">${m.time}</div>`;document.getElementById('msgBox').append(d);}
 
-let msgs = loadLocal(); msgs.forEach(m=>addMsg(m, m.from==MY_CODE)); // 1. CHARGER DU TELEPHONE
+let msgs = loadLocal(); msgs.forEach(m=>addMsg(m, m.from==MY_CODE));
 
 fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
-    saveLocal(serverMsgs); // 2. SYNCHRONISER AVEC SERVEUR
+    saveLocal(serverMsgs);
     document.getElementById('msgBox').innerHTML='';
     serverMsgs.forEach(m=>addMsg(m, m.from==MY_CODE));
 });
@@ -166,9 +136,7 @@ def login():
 @app.route('/register', methods=['GET','POST'])
 def register():
     if request.method=='GET': return render_template_string(REGISTER_HTML, CSS=CSS)
-    db=load_db(); nom=request.form['nom']; code=gen_code_port(); photo=""
-    if request.form.get('original_img'):
-        img=Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1]))).resize((150,150)); buf=BytesIO(); img.save(buf,format="PNG"); photo="data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
+    db=load_db(); nom=request.form['nom']; code=gen_code_port(); photo="" # PHOTO DESACTIVEE
     db["USERS"][code]={"nom":nom,"photo":photo,"contacts":[]}; save_db(db); session['code']=code; return redirect('/')
 
 @app.route('/settings')
@@ -178,9 +146,7 @@ def settings():
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
-    code,user,db=get_user(); user['nom']=request.form['nom']
-    if request.form.get('original_img'):
-        img=Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1]))).resize((150,150)); buf=BytesIO(); img.save(buf,format="PNG"); user['photo']="data:image/png;base64,"+base64.b64encode(buf.getvalue()).decode()
+    code,user,db=get_user(); user['nom']=request.form['nom'] # PHOTO DESACTIVEE
     db["USERS"][code]=user; save_db(db); return redirect('/settings')
 
 @app.route('/logout')
@@ -191,7 +157,7 @@ def logout():
 @app.route('/contacts')
 def contacts():
     code,user,db=get_user();
-    return render_template_string(CONTACTS_HTML, CSS=CSS, photo=user['photo'], my_code=code, central=CENTRAL_SERVER)
+    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/api/contacts')
 def api_contacts():
