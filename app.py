@@ -35,7 +35,7 @@ body {background:#111B21; color:#E9EDEF;}
 .btn-gray {background:#2A3942;}
 .input {padding:14px; border:none; border-radius:10px; background:#2A3942; color:white; width:100%; margin-top:6px; font-size:16px;}
 .form-group {margin-bottom:15px;}
-.avatar {width:40px; height:40px; border-radius:50%; background:#00A884; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; background-position:center; color:white; position:relative;}
+.avatar {width:40px; height:40px; border-radius:50%; background:#00A884; display:flex; align-items:center; justify-content:center; font-weight:bold; background-size:cover; background-position:center; color:white; position:relative; cursor:pointer;}
 .avatar-big {width:150px; height:150px; border-radius:50%; margin:0 auto 20px; display:flex; align-items:center; justify-content:center; background:#2A3942; font-size:60px; font-weight:bold; border:4px solid #00A884; background-size:cover; background-position:center;}
 .box {background:#202C33; padding:25px; border-radius:20px; max-width:450px; margin:30px auto; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.3);}
 .code-info {padding:14px; background:#000; font-size:20px; color:#00A884; border-radius:10px; text-align:center; letter-spacing:4px; font-weight:bold; margin:10px 0;}
@@ -68,21 +68,30 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>🙋 GenieChat</h2>
+<div class="box"><h2>👋 GenieChat</h2>
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
 <a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
-<form method="POST" action="/login" enctype="multipart/form-data">
+<form method="POST" action="/login">
+<div class="form-group"><label>Code Unique</label><input name="code" class="input" placeholder="Entre ton code" required></div>
+<button class="btn">Se Connecter</button>
+</form>
+<p style="text-align:center; margin-top:15px; color:#8696A0;">Pas de compte? Crée en un <a href="/register" style="color:#00A884;">ici</a></p>
+{% endif %}
+</div></body></html>"""
+
+REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Créer Compte</title><style>{{ CSS }}</style></head><body>
+<div class="box"><h2>Créer ton Compte</h2>
+<form method="POST" action="/register" enctype="multipart/form-data">
 <div id="preview" class="avatar-big">{{ '' }}</div>
 <label for="photo" class="btn btn-gray">📷 Choisir Photo Profil</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
 <input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
-<div class="form-group"><label>Nom d'utilisateur</label><input name="nom" id="nom" class="input" placeholder="Entre ton nom" required></div>
-<div class="form-group"><label>Code Unique</label><input name="code" id="code" class="input" placeholder="Laisse vide pour créer un nouveau"></div>
-<button class="btn">Entrer</button>
-</form>
-{% endif %}
+<div class="form-group"><label>Nom d'utilisateur</label><input name="nom" class="input" placeholder="Ton nom" required></div>
+<button class="btn">Créer et Entrer</button>
+</form><a href="/" class="btn btn-gray">Déjà un compte?</a>
 </div>
 <div id="cropModal" class="crop-modal"><div class="crop-area"><img id="cropImg" class="crop-img"><div class="crop-circle"></div></div>
 <div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button>
@@ -121,9 +130,34 @@ function saveCrop(){
 }
 </script></body></html>"""
 
+SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paramètres</title><style>{{ CSS }}</style></head><body>
+<div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Profil</h2><div></div></div>
+<div class="box"><form method="POST" action="/update_profile" enctype="multipart/form-data">
+<div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
+<label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
+<input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
+<div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
+<button class="btn">Enregistrer</button>
+</form></div>
+<script> /* même script crop que au dessus */
+let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
+document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
+document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
+document.querySelector('.crop-area').appendChild(cropImg);document.querySelector('.crop-area').appendChild(document.createElement('div')).className='crop-circle';
+document.getElementById('photo').onchange = function(e){const file=e.target.files[0]; if(!file) return;const reader=new FileReader();reader.onload=function(ev){cropImg.src = ev.target.result;document.getElementById('original_img').value = ev.target.result;document.getElementById('cropModal').style.display='flex';scale=0.8; posX=0; posY=0; updateTransform();}reader.readAsDataURL(file);}
+function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
+cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; startX = pos.x - posX; startY = pos.y - posY; })
+document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
+document.addEventListener('pointerup', ()=>{ isDragging=false; })
+function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
+function closeCrop(){document.getElementById('cropModal').style.display='none';}
+function saveCrop(){document.getElementById('crop_x').value=posX;document.getElementById('crop_y').value=posY;document.getElementById('crop_scale').value=scale;document.getElementById('preview').style.backgroundImage = `url(${cropImg.src})`;document.getElementById('preview').innerHTML = '';closeCrop();}
+</script></body></html>"""
+
 CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chats</title><style>{{ CSS }}</style></head><body style="display:flex; flex-direction:column; height:100vh;">
-<div class="header"><h2>Chats</h2><a href="/"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a></div>
+<div class="header"><h2>Chats</h2><a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a></div>
 <div class="contact-list">{% for c in contacts %}
 <div class="contact" onclick="location='/chat/{{ c }}'">
 <div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ '' if users[c].photo else users[c].nom[0]|upper }}</div>
@@ -196,7 +230,16 @@ function addMsg(from,msg,me,time,status,id,type='text'){
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
-socket.on('receive_message',d=>{if(d.from==AMI_CODE){addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();}});
+
+// CORRIGÉ: On écoute TOUS les messages même hors du chat
+socket.on('receive_message',d=>{
+    if(d.from==AMI_CODE){
+        addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
+    } else {
+        // Si c'est pas le chat ouvert, on recharge les contacts pour voir la boule verte
+        fetch('/contacts').then(()=>{});
+    }
+});
 </script></body></html>"""
 
 def get_user():
@@ -210,11 +253,12 @@ def login():
         return render_template_string(LOGIN_HTML, CSS=CSS, code=code, nom=user['nom'])
     return render_template_string(LOGIN_HTML, CSS=CSS, code=None, nom=None)
 
-@app.route('/login', methods=['GET','POST'])
-def do_login():
-    if request.method == 'GET': return redirect('/')
+@app.route('/register', methods=['GET','POST'])
+def register():
+    if request.method == 'GET':
+        return render_template_string(REGISTER_HTML, CSS=CSS)
     nom = request.form['nom']
-    code = request.form['code'].upper() if request.form['code'] else gen_code_port()
+    code = gen_code_port()
     photo = ""
     if request.form.get('original_img'):
         try:
@@ -225,24 +269,46 @@ def do_login():
             buf = BytesIO(); img.save(buf, format="PNG")
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
-    if code not in USERS:
-        USERS[code] = {"nom": nom, "photo": photo, "contacts": []}
-    else:
-        USERS[code]['nom'] = nom
-        if photo: USERS[code]['photo'] = photo
+    USERS[code] = {"nom": nom, "photo": photo, "contacts": []}
     save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
     session['code'] = code
-    session.permanent = True
-    resp = make_response(redirect('/'))
-    resp.set_cookie('genie_code', code, max_age=60*60*24*365)
-    return resp
+    return redirect('/')
+
+@app.route('/login', methods=['POST'])
+def do_login():
+    code = request.form['code'].upper()
+    if code in USERS:
+        session['code'] = code
+        return redirect('/')
+    return "Code introuvable", 404
+
+@app.route('/settings')
+def settings():
+    code, user = get_user()
+    if not code: return redirect('/')
+    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'])
+
+@app.route('/update_profile', methods=['POST'])
+def update_profile():
+    code, user = get_user()
+    if not code: return redirect('/')
+    user['nom'] = request.form['nom']
+    if request.form.get('original_img'):
+        try:
+            x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
+            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
+            size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
+            img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
+            buf = BytesIO(); img.save(buf, format="PNG")
+            user['photo'] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+        except: pass
+    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
+    return redirect('/settings')
 
 @app.route('/logout')
 def logout():
     session.pop('code', None)
-    resp = make_response(redirect('/'))
-    resp.delete_cookie('genie_code')
-    return resp
+    return redirect('/')
 
 @app.route('/contacts')
 def contacts():
@@ -251,24 +317,18 @@ def contacts():
     user_unread = UNREAD.get(code, {})
     return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=USERS, contacts=user['contacts'], unread=user_unread)
 
-@app.route('/ajouter', methods=['GET', 'POST']) # CORRIGÉ: On accepte GET aussi
+@app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
     code, user = get_user()
     if not code: return redirect('/')
-
-    if request.method == 'GET':
-        return redirect('/contacts') # Si quelqu'un actualise, on le renvoie aux contacts
-
+    if request.method == 'GET': return redirect('/contacts')
     code_ami = request.form['code_ami'].upper().strip()
     if code_ami in USERS:
-        if code_ami not in user['contacts']:
-            user['contacts'].append(code_ami)
-        if code not in USERS[code_ami]['contacts']:
-            USERS[code_ami]['contacts'].append(code)
+        if code_ami not in user['contacts']: user['contacts'].append(code_ami)
+        if code not in USERS[code_ami]['contacts']: USERS[code_ami]['contacts'].append(code)
         save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
         return redirect(f'/chat/{code_ami}')
-    else:
-        return "Code introuvable", 404
+    else: return "Code introuvable", 404
 
 @app.route('/chat/<code_ami>')
 def chat(code_ami):
@@ -277,7 +337,6 @@ def chat(code_ami):
     if code in UNREAD and code_ami in UNREAD[code]:
         UNREAD[code][code_ami] = 0
         save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
-
     ami = USERS.get(code_ami)
     if not ami: return "Contact introuvable", 404
     return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
@@ -290,8 +349,7 @@ def get_msg(ami):
 
 @socketio.on('receive_message')
 def receive(data):
-    code, _ = get_user()
-    cle = "-".join(sorted([code, data['from']]))
+    cle = "-".join(sorted([data['to'], data['from']]))
     if cle not in MESSAGES: MESSAGES[cle] = []
     MESSAGES[cle].append(data)
     dest = data['to']
@@ -299,7 +357,7 @@ def receive(data):
     if dest not in UNREAD: UNREAD[dest] = {}
     if src not in UNREAD[dest]: UNREAD[dest][src] = 0
     UNREAD[dest][src] += 1
-    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD})
+    save_db({"USERS": USERS, "MESSAGES": MESSAGES, "UNREAD": UNREAD}) # SAUVEGARDE IMMÉDIATE
 
 if __name__=='__main__':
     socketio.run(app,host='0.0.0.0',port=10000)
