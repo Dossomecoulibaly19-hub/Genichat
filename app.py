@@ -91,24 +91,13 @@ function saveCrop(){
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>👋 GenieChat</h2>{% if code and nom %}
+<div class="box"><h2>😈 GenieChat</h2>{% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a><a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
 <form method="POST" action="/login"><div class="form-group"><label>Code Unique</label><input name="code" class="input" placeholder="Entre ton code" required></div>
 <button class="btn">Se Connecter</button></form>
-<p style="text-align:center; margin-top:15px;"><a href="/register" style="color:#00A884;">Créer un compte</a></p>{% endif %}</div>
-<script>
-// Si on a un code en local, on propose de se reconnecter auto
-const savedCode = localStorage.getItem('genie_code');
-if(savedCode &&!window.location.search.includes('logout')){
-    document.querySelector('input[name=code]').value = savedCode;
-}
-document.querySelector('form')?.addEventListener('submit', ()=>{
-    localStorage.setItem('genie_code', document.querySelector('input[name=code]').value.toUpperCase());
-});
-</script>
-</body></html>"""
+<p style="text-align:center; margin-top:15px;"><a href="/register" style="color:#00A884;">Créer un compte</a></p>{% endif %}</div></body></html>"""
 
 REGISTER_HTML = f"""<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Créer Compte</title><style>{CSS}</style></head><body>
 <div class="box"><h2>Créer ton Compte</h2>
@@ -141,8 +130,6 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 socket.emit('join',{code:MY_CODE});
-
-// 1. TELECHARGER TOUS LES MESSAGES AU DEMARRAGE
 function syncAllMessages(contacts){
     contacts.forEach(c=>{
         const key = `chat_${MY_CODE}_${c}`;
@@ -151,28 +138,21 @@ function syncAllMessages(contacts){
         });
     });
 }
-
 function renderContacts(data){
-    localStorage.setItem('genie_users', JSON.stringify(data.users)); // Sauvegarde users
-    syncAllMessages(data.contacts); // Télécharge tout
-    
+    localStorage.setItem('genie_users', JSON.stringify(data.users));
+    syncAllMessages(data.contacts);
     let html=''; for(let c of data.contacts){
         if(!data.users[c]) continue;
         const key = `chat_${MY_CODE}_${c}`;
         const msgs = JSON.parse(localStorage.getItem(key) || '[]');
         const lastMsg = msgs.length > 0? msgs[msgs.length-1].msg : 'Nouveau contact';
-        
         html+=`<div class="contact" onclick="location='/chat/${c}'">
         <div class="avatar" style="${data.users[c].photo?`background-image:url('${data.users[c].photo}')`:''}">${data.users[c].photo?'':data.users[c].nom[0]}</div>
-        <div style="flex:1;">
-            <b>${data.users[c].nom}</b>
-            <div class="last-msg">${lastMsg}</div>
-        </div>
+        <div style="flex:1;"><b>${data.users[c].nom}</b><div class="last-msg">${lastMsg}</div></div>
         ${data.unread[c]>0?`<div class="badge">${data.unread[c]}</div>`:''}
         </div>`
     } document.getElementById('contact-list').innerHTML=html || '<p style="text-align:center; padding:20px; color:#8696A0;">Aucun contact. Ajoute un code.</p>';
 }
-
 fetch('/api/contacts').then(r=>r.json()).then(renderContacts);
 socket.on('new_message_alert', ()=>fetch('/api/contacts').then(r=>r.json()).then(renderContacts));
 </script></body></html>"""
@@ -185,24 +165,20 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const AMI_CODE="{{ code_ami }}";const STORAGE_KEY=`chat_${MY_CODE}_${AMI_CODE}`;
 socket.emit('join',{code:MY_CODE});
 const msgBox = document.getElementById('msgBox');
-
 function saveLocal(msgs){localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs));}
 function loadLocal(){return JSON.parse(localStorage.getItem(STORAGE_KEY)||'[]');}
 function addMsg(m,me){let d=document.createElement('div');d.className='msg '+(me?'me':'you');d.innerHTML=`${m.msg}<div class="time">${m.time}</div>`;msgBox.append(d); msgBox.scrollTop = msgBox.scrollHeight;}
 function loadAll(){msgBox.innerHTML=''; let msgs = loadLocal(); msgs.forEach(m=>addMsg(m, m.from==MY_CODE));}
-
-loadAll(); // Affiche direct ce qu'on a en local
-fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{ // Puis met à jour
+loadAll();
+fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(loadLocal())){
         saveLocal(serverMsgs); loadAll();
     }
 });
-
 document.getElementById('sendForm').onsubmit=e=>{e.preventDefault();const msg=document.getElementById('message').value.trim();if(!msg)return;
 let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:msg,time:t};
 let local = loadLocal(); local.push(data); saveLocal(local); addMsg(data,true);
 socket.emit('send_message',data); document.getElementById('message').value='';}
-
 socket.on('receive_message',d=>{ if(d.from==AMI_CODE){let local = loadLocal(); local.push(d); saveLocal(local); addMsg(d,false);} });
 </script></body></html>"""
 
@@ -234,7 +210,7 @@ def update_profile():
     db["USERS"][code]=user; save_db(db); return redirect('/contacts')
 
 @app.route('/logout')
-def logout(): session.pop('code',None); return redirect('/?logout=1')
+def logout(): session.pop('code',None); return redirect('/')
 
 @app.route('/contacts')
 def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_HTML, CSS=CSS, photo=user['photo'], nom=user['nom'], my_code=code, central=CENTRAL_SERVER)
@@ -242,7 +218,7 @@ def contacts(): code,user,db=get_user(); return render_template_string(CONTACTS_
 @app.route('/api/contacts')
 def api_contacts(): 
     code,user,db=get_user()
-    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{})
+    return jsonify({"users":db["USERS"],"contacts":user['contacts'],"unread":db["UNREAD"].get(code,{}) # CORRIGE ICI
 
 @app.route('/ajouter', methods=['POST'])
 def ajouter(): 
