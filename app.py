@@ -165,11 +165,19 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 socket.emit('join',{code:MY_CODE});
 
-// SYNC AUTO: Sauvegarde tous les messages dans localStorage
+// AJOUT: Fonction pour envoyer à l'app Android
+function sendToApp(data){
+  if(window.Android){
+    Android.saveMessage(JSON.stringify(data));
+  }
+}
+
+// SYNC AUTO: Sauvegarde tous les messages dans localStorage + App
 function syncMessages(){
   {% for c in contacts %}
   fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{
     localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs));
+    msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from}));
   });
   {% endfor %}
 }
@@ -198,6 +206,18 @@ const msgInput = document.getElementById('message');
 
 socket.on('connect',()=>socket.emit('join',{code:MY_CODE}));
 
+// AJOUT: Fonction pont vers Android
+function sendToApp(data){
+  if(window.Android){
+    Android.saveMessage(JSON.stringify({
+      contact: AMI_CODE,
+      message: data.msg,
+      heure: data.time,
+      envoyeur: data.from
+    }));
+  }
+}
+
 function saveLocal(msgs){ localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)); }
 function loadLocal(){ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
 
@@ -208,22 +228,21 @@ function render(msgs){
 }
 
 function load(){
-  // 1. Charge d'abord du localStorage
   let localMsgs = loadLocal();
   if(localMsgs.length > 0) render(localMsgs);
-
-  // 2. Puis sync avec serveur et écrase si différent
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
       saveLocal(serverMsgs);
+      serverMsgs.forEach(m => sendToApp(m)); // AJOUT: Sauvegarde dans App
       render(serverMsgs);
     }
-  });
+  }).catch(()=>{}); // Si serveur down on garde local
 }
 load();
 
 function sendData(data){
   let local = loadLocal(); local.push(data); saveLocal(local);
+  sendToApp(data); // AJOUT: Sauvegarde dans App direct
   addMsg(data.from_nom,data.msg,true,data.time,data.status,data.id,data.type); scroll();
   socket.emit('send_message',data);
 }
@@ -262,7 +281,7 @@ micBtn.onmouseup=micBtn.ontouchend=()=>{
 
 function addMsg(from,msg,me,time,status,id,type='text'){
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
-  let check = me? (status=='read'?'<span class="check blue">✓✓</span>':'<span class="check gray">✓</span>') : '';
+  let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
   let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
@@ -270,6 +289,7 @@ function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.sc
 socket.on('receive_message',d=>{
     if(d.from==AMI_CODE){
       let local = loadLocal(); local.push(d); saveLocal(local);
+      sendToApp(d); // AJOUT: Sauvegarde dans App
       addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
     }
 });
