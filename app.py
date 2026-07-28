@@ -1,6 +1,6 @@
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
 from flask_socketio import SocketIO, emit, join_room, leave_room
-import json, os, base64, time, random, string
+import json, os, base64, time, random, string, threading
 from datetime import datetime
 from io import BytesIO
 from PIL import Image
@@ -11,17 +11,30 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
+db_lock = threading.Lock() # AJOUT: Evite que 2 requetes ecrivent en meme temps
 
 def load_db():
-    if os.path.exists(DB_FILE):
-        with open(DB_FILE) as f: return json.load(f)
-    return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}}
+    with db_lock:
+        if os.path.exists(DB_FILE):
+            with open(DB_FILE) as f: return json.load(f)
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}}
 
 def save_db(db):
-    with open(DB_FILE, "w") as f: json.dump(db, f, indent=2)
+    # AJOUT: Sauvegarde en arrière plan pour ne pas bloquer
+    def _save():
+        with db_lock:
+            tmp = DB_FILE + ".tmp"
+            with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':')) # plus rapide, moins lourd
+            os.replace(tmp, DB_FILE)
+    threading.Thread(target=_save, daemon=True).start()
 
 def gen_code_port():
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    db = load_db()
+    # AJOUT: Boucle jusqu'a trouver un code unique. Evite les doublons
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        if code not in db["USERS"]:
+            return code
 
 CSS = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif;}
 body {background:#111B21; color:#E9EDEF;}
@@ -405,7 +418,7 @@ def handle_send(data):
     if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
     db["UNREAD"][dest][src] += 1
 
-    save_db(db)
+    save_db(db) # Maintenant c'est en thread, ne bloque plus
 
     emit('receive_message', data, room=dest)
     emit('new_message_alert', {}, room=dest)
