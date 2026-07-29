@@ -73,7 +73,7 @@ body {background:#111B21; color:#E9EDEF;}
 .alert{background:#00A884; padding:12px; border-radius:10px; margin-bottom:15px; text-align:center; font-weight:600;}
 .crop-modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:99; flex-direction:column; justify-content:center; align-items:center;}
 .crop-area {position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:hidden; touch-action:none;}
-.crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0.8); pointer-events:none;}
+.crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0,0.8); pointer-events:none;}
 .crop-square {border-radius:0;} /* AJOUT POUR STATUT RECTANGLE */
 .crop-img {position:absolute; cursor:grab; max-width:none; left:50%; top:50%; touch-action:none; user-select:none;}
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
@@ -100,8 +100,11 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .video-editor{padding:10px; text-align:center;}
 .video-editor video{width:100%; max-height:60vh; background:#000;}
 .video-slider{width:100%; margin:10px 0;}
-.status-list{display:flex; overflow-x:auto; padding:10px; gap:10px;}
-.status-item{width:80px; height:120px; border-radius:10px; background:#2A3942; flex-shrink:0; position:relative; background-size:cover; border:3px solid #00A884;}
+.status-list{display:flex; flex-direction:column; padding:10px; gap:5px; overflow-y:auto;} /* MODIF POUR LISTE CONTACTS */
+.status-contact{display:flex; align-items:center; gap:10px; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer;}
+.status-contact.avatar{border:3px solid #2A3942;}
+.status-contact.has-status.avatar{border:3px solid #00A884;}
+.status-preview{width:60px; height:90px; border-radius:8px; background-size:cover; background-position:center; margin-left:auto;}
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -224,9 +227,9 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>
 
 <div id="page-statut" class="page">
+<div style="padding:10px;"><button class="btn" onclick="document.getElementById('statusFile').click()">+ Ajouter mon Statut</button></div>
 <div class="status-list" id="statusList"></div>
 <input type="file" id="statusFile" accept="image/*,video/*" style="display:none;">
-<button class="btn" onclick="document.getElementById('statusFile').click()">+ Nouveau Statut</button>
 </div>
 
 <div id="page-chaines" class="page">
@@ -248,6 +251,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="crop-modal" id="videoEditorModal">
 <div class="video-editor">
 <video id="videoPreview" controls></video>
+<input type="text" id="statusText" class="input" placeholder="Écris un texte sur ton statut...">
 <label>Début: <input type="range" id="videoSliderStart" class="video-slider" min="0" value="0"></label>
 <label>Fin: <input type="range" id="videoSliderEnd" class="video-slider" min="100" value="100"></label>
 <div class="crop-buttons">
@@ -281,7 +285,7 @@ function showPage(page){
     document.getElementById('page-'+page).classList.add('active');
     event.currentTarget.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
-    if(page=='statut'){ loadStatus(); }
+    if(page=='statut'){ loadAllStatus(); } // MODIF
 }
 
 // AJOUT 8: EDITEUR VIDEO STATUT + CHAINE
@@ -292,32 +296,49 @@ function openVideoEditor(e, target){
     videoFile = e.target.files[0]; if(!videoFile) return;
     publishTarget = target;
     videoType = videoFile.type.startsWith('video')? 'video' : 'image';
-    if(videoType == 'image'){ publishMedia(); return; }
     const reader = new FileReader();
     reader.onload = function(ev){
-        document.getElementById('videoPreview').src = ev.target.result;
-        document.getElementById('videoEditorModal').style.display='flex';
+        if(videoType == 'video'){
+            document.getElementById('videoPreview').src = ev.target.result;
+            document.getElementById('videoEditorModal').style.display='flex';
+        }else{
+            publishMedia(ev.target.result);
+        }
     }
     reader.readAsDataURL(videoFile);
 }
-function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; }
+function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; document.getElementById('statusText').value=''; }
 function publishVideo(){
-    const start = document.getElementById('videoSliderStart').value / 100;
-    const end = document.getElementById('videoSliderEnd').value / 100;
+    const start = document.getElementById('videoSliderStart').value;
+    const end = document.getElementById('videoSliderEnd').value;
+    const text = document.getElementById('statusText').value;
     const reader = new FileReader();
     reader.onload = function(ev){
-        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:ev.target.result, start, end, target:publishTarget})}).then(()=>{closeVideoEditor(); loadStatus(); loadChannels();})
+        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:ev.target.result, start, end, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus(); loadChannels();})
     }
     reader.readAsDataURL(videoFile);
 }
-function publishMedia(){
-    const reader = new FileReader();
-    reader.onload = function(ev){
-        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data:ev.target.result, target:publishTarget})}).then(()=>{loadStatus(); loadChannels();})
-    }
-    reader.readAsDataURL(videoFile);
+function publishMedia(data){
+    const text = document.getElementById('statusText').value;
+    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data, text, target:publishTarget})}).then(r=>r.json()).then(()=>{loadAllStatus(); loadChannels(); document.getElementById('statusText').value='';})
 }
-function loadStatus(){ fetch('/get_status').then(r=>r.json()).then(data=>{ let html=''; data.forEach(s=>{ html+=`<div class="status-item" style="background-image:url(${s.data})"></div>` }); document.getElementById('statusList').innerHTML=html || '<p style="padding:20px;">Aucun statut</p>'; }) }
+
+function loadAllStatus(){ // NOUVELLE FONCTION POUR AFFICHER TOUS LES CONTACTS
+    fetch('/get_all_status').then(r=>r.json()).then(data=>{
+        let html='';
+        data.forEach(user=>{
+            let hasStatus = user.status.length > 0;
+            let preview = hasStatus? user.status[0].data : '';
+            html+=`<div class="status-contact ${hasStatus?'has-status':''}" onclick="viewStatus('${user.code}')">
+                <div class="avatar" style="background-image:url('${user.photo}')">${user.photo?'':user.nom[0]}</div>
+                <div class="contact-info"><b>${user.nom}</b><br><small>${hasStatus?'Voir statut':'Aucun statut'}</small></div>
+                ${hasStatus?`<div class="status-preview" style="background-image:url(${preview})"></div>`:''}
+            </div>`
+        });
+        document.getElementById('statusList').innerHTML=html || '<p style="padding:20px; text-align:center;">Ajoute des contacts pour voir leurs statuts</p>';
+    })
+}
+function viewStatus(code){ alert('Ouverture des statuts de: '+code) }
 
 function startLongPress(code){ longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
 function endLongPress(){ clearTimeout(longPressTimer); }
@@ -396,7 +417,7 @@ function load(){
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
-      saveLocal(serverMsgs);
+            saveLocal(serverMsgs);
       serverMsgs.forEach(m => sendToApp(m));
       render(serverMsgs);
     }
@@ -425,39 +446,39 @@ micBtn.onmousedown=micBtn.ontouchstart=async()=>{
   mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
   audioChunks = [];
   mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-      mediaRecorder.onstop=()=>{
-      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
-      const reader = new FileReader();
-      reader.onloadend=()=>{
-        const base64Audio = reader.result;
-        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-        let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
-        sendData(data);
-      }
-      reader.readAsDataURL(audioBlob);
+  mediaRecorder.onstop=()=>{
+    const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+    const reader = new FileReader();
+    reader.onloadend=()=>{
+      const base64Audio = reader.result;
+      let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+      let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
+      sendData(data);
     }
-    mediaRecorder.start();
+    reader.readAsDataURL(audioBlob);
   }
-  micBtn.onmouseup=micBtn.ontouchend=()=>{
-    if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
-    micBtn.classList.remove('recording');
-  }
+  mediaRecorder.start();
+}
+micBtn.onmouseup=micBtn.ontouchend=()=>{
+  if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
+  micBtn.classList.remove('recording');
+}
 
-  function addMsg(from,msg,me,time,status,id,type='text'){
-    let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
-    let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
-    let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
-    d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
-  }
-  function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
-  socket.on('receive_message',d=>{
-      if(d.from==AMI_CODE){
-        let local = loadLocal(); local.push(d); saveLocal(local);
-        sendToApp(d);
-        addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
-      }
-  });
-  </script></body></html>"""
+function addMsg(from,msg,me,time,status,id,type='text'){
+  let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
+  let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
+  d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
+}
+function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
+socket.on('receive_message',d=>{
+    if(d.from==AMI_CODE){
+      let local = loadLocal(); local.push(d); saveLocal(local);
+      sendToApp(d);
+      addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
+    }
+});
+</script></body></html>"""
 
 def get_user():
     code = session.get('code')
@@ -486,7 +507,7 @@ def register():
         except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
-    if code not in db["STATUS"]: db["STATUS"][code] = [] # AJOUT INIT STATUS
+    if code not in db["STATUS"]: db["STATUS"][code] = []
     save_db(db); session['code'] = code; return redirect('/')
 
 @app.route('/login', methods=['POST'])
@@ -601,23 +622,32 @@ def get_channels():
     db = load_db()
     return jsonify(list(db["CHANNELS"].values()))
 
-# AJOUT 11: ROUTES STATUT 24H
+# AJOUT 11: ROUTES STATUT 24H + TOUS CONTACTS
+@app.route('/get_all_status')
+def get_all_status():
+    code, user, db = get_user()
+    if not code: return jsonify([])
+    clean_status()
+    result = []
+    for c in user['contacts']:
+        if c in db["USERS"]:
+            result.append({
+                "code": c,
+                "nom": db["USERS"][c]['nom'],
+                "photo": db["USERS"][c]['photo'],
+                "status": db["STATUS"].get(c, [])
+            })
+    return jsonify(result)
+
 @app.route('/publish_status', methods=['POST'])
 def publish_status():
     code, user, db = get_user()
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
     if code not in db["STATUS"]: db["STATUS"][code] = []
-    db["STATUS"][code].append({"type": data['type'], "data": data['data'], "time": datetime.now().isoformat(), "target": data.get('target')})
+    db["STATUS"][code].append({"type": data['type'], "data": data['data'], "time": datetime.now().isoformat(), "text": data.get('text',''), "target": data.get('target')})
     save_db(db)
     return jsonify({"status":"ok"})
-
-@app.route('/get_status')
-def get_status():
-    code, user, db = get_user()
-    if not code: return jsonify([])
-    clean_status() # nettoie avant d'envoyer
-    return jsonify(db["STATUS"].get(code, []))
 
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
