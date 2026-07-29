@@ -543,4 +543,5 @@ def handle_send(data):
     emit('new_message_alert', {}, room=dest)
 
 if __name__=='__main__':
-    socketio.run(app,host='0.0.0.0',port=10000)
+    port = int(os.environ.get("PORT", 10000)) # MODIF POUR RENDER
+    socketio.run(app,host='0.0.0.0',port=port)
