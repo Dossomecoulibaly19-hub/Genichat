@@ -1,7 +1,7 @@
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import json, os, base64, time, random, string, threading
-from datetime import datetime
+from datetime import datetime, timedelta # AJOUT POUR STATUT 24H
 from io import BytesIO
 from PIL import Image
 
@@ -17,7 +17,7 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             with open(DB_FILE) as f: return json.load(f)
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}} # AJOUT 1: CHANNELS
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}} # AJOUT STATUS ICI SEULEMENT
 
 def save_db(db):
     def _save():
@@ -33,6 +33,15 @@ def gen_code_port():
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         if code not in db["USERS"]:
             return code
+
+# AJOUT 1: NETTOYAGE STATUT 24H AUTO
+def clean_status():
+    db = load_db()
+    now = datetime.now()
+    for user_code in list(db["STATUS"].keys()):
+        db["STATUS"][user_code] = [s for s in db["STATUS"][user_code] if datetime.fromisoformat(s['time']) > now - timedelta(hours=24)]
+    save_db(db)
+threading.Timer(3600, clean_status).start() # toutes les 1h
 
 CSS = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif; -webkit-user-select:none; user-select:none;} /* AJOUT 2: bloque selection */
 body {background:#111B21; color:#E9EDEF;}
@@ -64,7 +73,8 @@ body {background:#111B21; color:#E9EDEF;}
 .alert{background:#00A884; padding:12px; border-radius:10px; margin-bottom:15px; text-align:center; font-weight:600;}
 .crop-modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:99; flex-direction:column; justify-content:center; align-items:center;}
 .crop-area {position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:hidden; touch-action:none;}
-.crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0,0.8); pointer-events:none;}
+.crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0.8); pointer-events:none;}
+.crop-square {border-radius:0;} /* AJOUT POUR STATUT RECTANGLE */
 .crop-img {position:absolute; cursor:grab; max-width:none; left:50%; top:50%; touch-action:none; user-select:none;}
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
 h2{text-align:center; margin-bottom:15px; color:#00A884;}
@@ -86,11 +96,17 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .page.active{display:flex;}
 .editor-video{padding:20px; text-align:center; color:#8696A0;}
 .channel-card{background:#2A3942; padding:15px; margin:10px; border-radius:10px; display:flex; gap:10px; align-items:center;}
+/* AJOUT 5: VIDEO EDITOR + STATUT */
+.video-editor{padding:10px; text-align:center;}
+.video-editor video{width:100%; max-height:60vh; background:#000;}
+.video-slider{width:100%; margin:10px 0;}
+.status-list{display:flex; overflow-x:auto; padding:10px; gap:10px;}
+.status-item{width:80px; height:120px; border-radius:10px; background:#2A3942; flex-shrink:0; position:relative; background-size:cover; border:3px solid #00A884;}
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>😈 GenieChat</h2>
+<div class="box"><h2>👋 GenieChat</h2>
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
@@ -207,11 +223,17 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <input name="code_ami" placeholder="Entrer CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
 </div>
 
-<div id="page-statut" class="page"><div class="editor-video"><h3>Éditeur Statut</h3><p>Ajoute photo/video 24h. Bientôt.</p><input type="file" accept="image/*,video/*" class="btn btn-gray"></div></div>
+<div id="page-statut" class="page">
+<div class="status-list" id="statusList"></div>
+<input type="file" id="statusFile" accept="image/*,video/*" style="display:none;">
+<button class="btn" onclick="document.getElementById('statusFile').click()">+ Nouveau Statut</button>
+</div>
 
 <div id="page-chaines" class="page">
 <div style="padding:10px;"><input id="searchChannel" class="input" placeholder="Recher une chaîne"><button class="btn" onclick="createChannel()">+ Créer ma chaîne</button></div>
-<div id="channelsList" class="contact-list"></div></div>
+<div id="channelsList" class="contact-list"></div>
+<input type="file" id="channelFile" accept="image/*,video/*" style="display:none;">
+</div>
 
 <div id="page-actu" class="page"><div class="editor-video"><h3>Actualités IA</h3><p>Résumé de tes messages non lus. Désactivé pour le moment.</p></div></div>
 
@@ -220,6 +242,19 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="nav-item" onclick="showPage('statut')"><span>⭕</span>Statut</div>
 <div class="nav-item" onclick="showPage('chaines')"><span>📢</span>Chaînes</div>
 <div class="nav-item" onclick="showPage('actu')"><span>📰</span>Actu</div>
+</div>
+
+<!-- AJOUT 6: MODAL EDITEUR VIDEO -->
+<div class="crop-modal" id="videoEditorModal">
+<div class="video-editor">
+<video id="videoPreview" controls></video>
+<label>Début: <input type="range" id="videoSliderStart" class="video-slider" min="0" value="0"></label>
+<label>Fin: <input type="range" id="videoSliderEnd" class="video-slider" min="100" value="100"></label>
+<div class="crop-buttons">
+<button class="btn btn-gray" onclick="closeVideoEditor()">Annuler</button>
+<button class="btn" onclick="publishVideo()">OK Publier</button>
+</div>
+</div>
 </div>
 
 <div class="popup" id="deletePopup">
@@ -236,6 +271,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false;
+let videoFile, videoType, publishTarget; // AJOUT 7
 
 socket.emit('join',{code:MY_CODE});
 
@@ -245,53 +281,60 @@ function showPage(page){
     document.getElementById('page-'+page).classList.add('active');
     event.currentTarget.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
+    if(page=='statut'){ loadStatus(); }
 }
+
+// AJOUT 8: EDITEUR VIDEO STATUT + CHAINE
+document.getElementById('statusFile').onchange = e => openVideoEditor(e, 'status');
+document.getElementById('channelFile').onchange = e => openVideoEditor(e, 'channel');
+
+function openVideoEditor(e, target){
+    videoFile = e.target.files[0]; if(!videoFile) return;
+    publishTarget = target;
+    videoType = videoFile.type.startsWith('video')? 'video' : 'image';
+    if(videoType == 'image'){ publishMedia(); return; }
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        document.getElementById('videoPreview').src = ev.target.result;
+        document.getElementById('videoEditorModal').style.display='flex';
+    }
+    reader.readAsDataURL(videoFile);
+}
+function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; }
+function publishVideo(){
+    const start = document.getElementById('videoSliderStart').value / 100;
+    const end = document.getElementById('videoSliderEnd').value / 100;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:ev.target.result, start, end, target:publishTarget})}).then(()=>{closeVideoEditor(); loadStatus(); loadChannels();})
+    }
+    reader.readAsDataURL(videoFile);
+}
+function publishMedia(){
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data:ev.target.result, target:publishTarget})}).then(()=>{loadStatus(); loadChannels();})
+    }
+    reader.readAsDataURL(videoFile);
+}
+function loadStatus(){ fetch('/get_status').then(r=>r.json()).then(data=>{ let html=''; data.forEach(s=>{ html+=`<div class="status-item" style="background-image:url(${s.data})"></div>` }); document.getElementById('statusList').innerHTML=html || '<p style="padding:20px;">Aucun statut</p>'; }) }
 
 function startLongPress(code){ longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
 function endLongPress(){ clearTimeout(longPressTimer); }
 function enterSelectionMode(code){ isSelecting = true; selectContact(code); }
-
-function selectContact(code){
-    const el = document.querySelector(`[data-code="${code}"]`);
-    if(!el) return;
-    if(selectedContacts.includes(code)){
-        selectedContacts = selectedContacts.filter(c=>c!=code);
-        el.classList.remove('selected');
-    } else {
-        selectedContacts.push(code);
-        el.classList.add('selected');
-    }
-    updateSelectionHeader();
-}
-
-function updateSelectionHeader(){
-    if(selectedContacts.length > 0){
-        document.getElementById('mainHeader').style.display='none';
-        document.getElementById('selectionHeader').style.display='flex';
-        document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné';
-    }
-}
-
-function exitSelection(){
-    isSelecting = false; selectedContacts = [];
-    document.querySelectorAll('.contact.selected').forEach(el=>el.classList.remove('selected'));
-    document.getElementById('mainHeader').style.display='flex';
-    document.getElementById('selectionHeader').style.display='none';
-}
-
+function selectContact(code){ const el = document.querySelector(`[data-code="${code}"]`); if(!el) return; if(selectedContacts.includes(code)){ selectedContacts = selectedContacts.filter(c=>c!=code); el.classList.remove('selected'); } else { selectedContacts.push(code); el.classList.add('selected'); } updateSelectionHeader(); }
+function updateSelectionHeader(){ if(selectedContacts.length > 0){ document.getElementById('mainHeader').style.display='none'; document.getElementById('selectionHeader').style.display='flex'; document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné'; } }
+function exitSelection(){ isSelecting = false; selectedContacts = []; document.querySelectorAll('.contact.selected').forEach(el=>el.classList.remove('selected')); document.getElementById('mainHeader').style.display='flex'; document.getElementById('selectionHeader').style.display='none'; }
 function confirmDelete(){ document.getElementById('deleteText').innerText = `Supprimer ${selectedContacts.length} contact(s) et tous leurs messages?`; document.getElementById('deletePopup').style.display='flex'; }
 function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
 function deleteConfirmed(){ fetch('/delete_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
 function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
-
-function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar">${ch.name[0]}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
+function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar">${ch.name[0]}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small><button class="btn btn-gray" onclick="event.stopPropagation(); publishTarget='channel_${ch.id}'; document.getElementById('channelFile').click();">Publier</button></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
 function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(()=>loadChannels()) } }
 function openChannel(id){ alert("Ouverture chaîne: " + id + ". Mode lecture seule.") }
+document.querySelectorAll('.contact').forEach(el=>{ el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } }); });
 
-document.querySelectorAll('.contact').forEach(el=>{
-    el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } });
-});
-
+// AJOUT 9: SYNC ARRIERE PLAN POUR L'APP
 function sendToApp(data){ if(window.Android){ Android.saveMessage(JSON.stringify(data)); } }
 function syncMessages(){ {% for c in contacts %} fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{ localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs)); msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from})); }); {% endfor %} }
 syncMessages(); socket.on('new_message_alert', ()=>{ syncMessages(); });
@@ -382,39 +425,39 @@ micBtn.onmousedown=micBtn.ontouchstart=async()=>{
   mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
   audioChunks = [];
   mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-  mediaRecorder.onstop=()=>{
-    const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
-    const reader = new FileReader();
-    reader.onloadend=()=>{
-      const base64Audio = reader.result;
-      let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-      let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
-      sendData(data);
+      mediaRecorder.onstop=()=>{
+      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+      const reader = new FileReader();
+      reader.onloadend=()=>{
+        const base64Audio = reader.result;
+        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+        let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
+        sendData(data);
+      }
+      reader.readAsDataURL(audioBlob);
     }
-    reader.readAsDataURL(audioBlob);
+    mediaRecorder.start();
   }
-  mediaRecorder.start();
-}
-micBtn.onmouseup=micBtn.ontouchend=()=>{
-  if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
-  micBtn.classList.remove('recording');
-}
+  micBtn.onmouseup=micBtn.ontouchend=()=>{
+    if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
+    micBtn.classList.remove('recording');
+  }
 
-function addMsg(from,msg,me,time,status,id,type='text'){
-  let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
-  let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
-  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
-  d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
-}
-function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
-socket.on('receive_message',d=>{
-    if(d.from==AMI_CODE){
-      let local = loadLocal(); local.push(d); saveLocal(local);
-      sendToApp(d);
-      addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
-    }
-});
-</script></body></html>"""
+  function addMsg(from,msg,me,time,status,id,type='text'){
+    let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
+    let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
+    let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
+    d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
+  }
+  function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
+  socket.on('receive_message',d=>{
+      if(d.from==AMI_CODE){
+        let local = loadLocal(); local.push(d); saveLocal(local);
+        sendToApp(d);
+        addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
+      }
+  });
+  </script></body></html>"""
 
 def get_user():
     code = session.get('code')
@@ -443,6 +486,7 @@ def register():
         except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
+    if code not in db["STATUS"]: db["STATUS"][code] = [] # AJOUT INIT STATUS
     save_db(db); session['code'] = code; return redirect('/')
 
 @app.route('/login', methods=['POST'])
@@ -541,7 +585,7 @@ def get_msg(ami):
     cle = "-".join(sorted([code, ami]))
     return jsonify(db["MESSAGES"].get(cle, []))
 
-# AJOUT 5: ROUTES CHAINES
+# AJOUT 10: ROUTES CHAINES
 @app.route('/create_channel', methods=['POST'])
 def create_channel():
     code, user, db = get_user()
@@ -556,6 +600,24 @@ def create_channel():
 def get_channels():
     db = load_db()
     return jsonify(list(db["CHANNELS"].values()))
+
+# AJOUT 11: ROUTES STATUT 24H
+@app.route('/publish_status', methods=['POST'])
+def publish_status():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    if code not in db["STATUS"]: db["STATUS"][code] = []
+    db["STATUS"][code].append({"type": data['type'], "data": data['data'], "time": datetime.now().isoformat(), "target": data.get('target')})
+    save_db(db)
+    return jsonify({"status":"ok"})
+
+@app.route('/get_status')
+def get_status():
+    code, user, db = get_user()
+    if not code: return jsonify([])
+    clean_status() # nettoie avant d'envoyer
+    return jsonify(db["STATUS"].get(code, []))
 
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
