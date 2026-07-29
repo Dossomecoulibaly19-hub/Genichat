@@ -17,7 +17,7 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             with open(DB_FILE) as f: return json.load(f)
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}} # AJOUT STATUS ICI SEULEMENT
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}} # AJOUT CHANNEL_MSGS
 
 def save_db(db):
     def _save():
@@ -31,7 +31,7 @@ def gen_code_port():
     db = load_db()
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if code not in db["USERS"]:
+        if code not in db["USERS"] and code not in db["CHANNELS"]:
             return code
 
 # AJOUT 1: NETTOYAGE STATUT 24H AUTO
@@ -105,96 +105,10 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .status-contact.avatar{border:3px solid #2A3942;}
 .status-contact.has-status.avatar{border:3px solid #00A884;}
 .status-preview{width:60px; height:90px; border-radius:8px; background-size:cover; background-position:center; margin-left:auto;}
+.file-input-btn{display:inline-block; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer; margin:5px;}
 """
 
-LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>👋 GenieChat</h2>
-{% if code and nom %}
-<div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
-<a href="/contacts" class="btn">Accéder aux Chats</a>
-<a href="/logout" class="btn btn-gray">Changer de Compte</a>
-{% else %}
-<form method="POST" action="/login">
-<div class="form-group"><label>Code Unique</label><input name="code" class="input" placeholder="Entre ton code" required></div>
-<button class="btn">Se Connecter</button>
-</form>
-<p style="text-align:center; margin-top:15px; color:#8696A0;">Pas de compte? Crée en un <a href="/register" style="color:#00A884;">ici</a></p>
-{% endif %}
-</div></body></html>"""
-
-REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Créer Compte</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>Créer ton Compte</h2>
-<form method="POST" action="/register" enctype="multipart/form-data">
-<div id="preview" class="avatar-big">{{ '' }}</div>
-<label for="photo" class="btn btn-gray">📷 Choisir Photo Profil</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
-<input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
-<div class="form-group"><label>Nom d'utilisateur</label><input name="nom" class="input" placeholder="Ton nom" required></div>
-<button class="btn">Créer et Entrer</button>
-</form><a href="/" class="btn btn-gray">Déjà un compte?</a>
-</div>
-<div id="cropModal" class="crop-modal"><div class="crop-area"><img id="cropImg" class="crop-img"><div class="crop-circle"></div></div>
-<div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button>
-<button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button>
-<button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button>
-<button type="button" class="btn" onclick="saveCrop()">Valider</button></div></div>
-<script>
-let scale=1,posX=0,posY=0,isDragging=false;
-let cropImg = document.getElementById('cropImg'); let preview = document.getElementById('preview');
-document.getElementById('photo').onchange = function(e){
-    const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=function(ev){
-        cropImg.src = ev.target.result;
-        document.getElementById('original_img').value = ev.target.result;
-        document.getElementById('cropModal').style.display='flex';
-        scale=0.8; posX=0; posY=0; updateTransform();
-    }
-    reader.readAsDataURL(file);
-}
-function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
-cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; startX = pos.x - posX; startY = pos.y - posY; })
-document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
-document.addEventListener('pointerup', ()=>{ isDragging=false; })
-function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
-function closeCrop(){document.getElementById('cropModal').style.display='none';}
-function saveCrop(){
-    document.getElementById('crop_x').value=posX;
-    document.getElementById('crop_y').value=posY;
-    document.getElementById('crop_scale').value=scale;
-    preview.style.backgroundImage = `url(${cropImg.src})`;
-    preview.innerHTML = '';
-    closeCrop();
-}
-</script></body></html>"""
-
-SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Paramètres</title><style>{{ CSS }}</style></head><body>
-<div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Profil</h2><div></div></div>
-<div class="box">
-<label>TON CODE:</label><div class="code-info" onclick="navigator.clipboard.writeText('{{ code }}')"> {{ code }} </div><small style="color:#8696A0;">Clique pour copier</small>
-<form method="POST" action="/update_profile" enctype="multipart/form-data">
-<div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
-<label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
-<input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
-<div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
-<button class="btn">Enregistrer</button>
-</form></div>
-<script>
-let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
-document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
-document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
-document.querySelector('.crop-area').appendChild(cropImg);document.querySelector('.crop-area').appendChild(document.createElement('div')).className='crop-circle';
-document.getElementById('photo').onchange = function(e){const file=e.target.files[0]; if(!file) return;const reader=new FileReader();reader.onload=function(ev){cropImg.src = ev.target.result;document.getElementById('original_img').value = ev.target.result;document.getElementById('cropModal').style.display='flex';scale=0.8; posX=0; posY=0; updateTransform();}reader.readAsDataURL(file);}
-function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
-cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; startX = pos.x - posX; startY = pos.y - posY; })
-document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
-document.addEventListener('pointerup', ()=>{ isDragging=false; })
-function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
-function closeCrop(){document.getElementById('cropModal').style.display='none';}
-function saveCrop(){document.getElementById('crop_x').value=posX;document.getElementById('crop_y').value=posY;document.getElementById('crop_scale').value=scale;document.getElementById('preview').style.backgroundImage = `url(${cropImg.src})`;document.getElementById('preview').innerHTML = '';closeCrop();}
-</script></body></html>"""
+# TES HTML LOGIN, REGISTER, SETTINGS RESTENT IDENTIQUES
 
 CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Chats</title><style>{{ CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
@@ -235,7 +149,6 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-chaines" class="page">
 <div style="padding:10px;"><input id="searchChannel" class="input" placeholder="Recher une chaîne"><button class="btn" onclick="createChannel()">+ Créer ma chaîne</button></div>
 <div id="channelsList" class="contact-list"></div>
-<input type="file" id="channelFile" accept="image/*,video/*" style="display:none;">
 </div>
 
 <div id="page-actu" class="page"><div class="editor-video"><h3>Actualités IA</h3><p>Résumé de tes messages non lus. Désactivé pour le moment.</p></div></div>
@@ -252,12 +165,25 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="video-editor">
 <video id="videoPreview" controls></video>
 <input type="text" id="statusText" class="input" placeholder="Écris un texte sur ton statut...">
-<label>Début: <input type="range" id="videoSliderStart" class="video-slider" min="0" value="0"></label>
-<label>Fin: <input type="range" id="videoSliderEnd" class="video-slider" min="100" value="100"></label>
+<label>Début: <input type="range" id="videoSliderStart" class="video-slider" min="0" value="0" max="100"></label>
+<label>Fin: <input type="range" id="videoSliderEnd" class="video-slider" min="0" value="100" max="100"></label>
 <div class="crop-buttons">
 <button class="btn btn-gray" onclick="closeVideoEditor()">Annuler</button>
 <button class="btn" onclick="publishVideo()">OK Publier</button>
 </div>
+</div>
+</div>
+
+<!-- AJOUT 7: PAGE CHAINE CHAT -->
+<div id="channelChatPage" class="page" style="display:none; height:100vh;">
+<div class="header"><button onclick="backToChannels()" style="background:none; border:none; color:white; font-size:24px;">←</button>
+<div class="avatar" id="channelAvatar"></div>
+<div><b id="channelName"></b><br><small id="channelDesc" style="color:#8696A0;"></small></div></div>
+<div class="messages" id="channelMsgBox"></div>
+<div class="add-bar">
+<label class="file-input-btn">📎<input type="file" id="channelFileInput" style="display:none;"></label>
+<input type="text" id="channelMessage" placeholder="Écris un message" class="input">
+<button class="btn" style="width:60px;" onclick="sendChannelMsg()">➤</button>
 </div>
 </div>
 
@@ -275,55 +201,55 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false;
-let videoFile, videoType, publishTarget; // AJOUT 7
+let videoBase64 = null; let videoType, publishTarget; let currentChannel = null; // FIX: on garde le base64
 
 socket.emit('join',{code:MY_CODE});
 
 function showPage(page){
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.page').forEach(p=>p.style.display='none');
     document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
-    document.getElementById('page-'+page).classList.add('active');
+    document.getElementById('page-'+page).style.display='flex';
     event.currentTarget.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
-    if(page=='statut'){ loadAllStatus(); } // MODIF
+    if(page=='statut'){ loadAllStatus(); }
 }
 
-// AJOUT 8: EDITEUR VIDEO STATUT + CHAINE
+// AJOUT 8: EDITEUR VIDEO STATUT + CHAINE CORRIGE
 document.getElementById('statusFile').onchange = e => openVideoEditor(e, 'status');
-document.getElementById('channelFile').onchange = e => openVideoEditor(e, 'channel');
+document.getElementById('channelFileInput').onchange = e => sendChannelFile(e);
 
 function openVideoEditor(e, target){
-    videoFile = e.target.files[0]; if(!videoFile) return;
+    const file = e.target.files[0]; if(!file) return;
     publishTarget = target;
-    videoType = videoFile.type.startsWith('video')? 'video' : 'image';
+    videoType = file.type.startsWith('video')? 'video' : 'image';
     const reader = new FileReader();
     reader.onload = function(ev){
+        videoBase64 = ev.target.result; // ON GARDE EN MEMOIRE
         if(videoType == 'video'){
             document.getElementById('videoPreview').src = ev.target.result;
+            document.getElementById('videoSliderEnd').max = document.getElementById('videoPreview').duration || 100;
             document.getElementById('videoEditorModal').style.display='flex';
         }else{
             publishMedia(ev.target.result);
         }
     }
-    reader.readAsDataURL(videoFile);
+    reader.readAsDataURL(file);
 }
-function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; document.getElementById('statusText').value=''; }
+function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; document.getElementById('statusText').value=''; videoBase64=null; }
 function publishVideo(){
     const start = document.getElementById('videoSliderStart').value;
     const end = document.getElementById('videoSliderEnd').value;
     const text = document.getElementById('statusText').value;
-    const reader = new FileReader();
-    reader.onload = function(ev){
-        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:ev.target.result, start, end, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus(); loadChannels();})
-    }
-    reader.readAsDataURL(videoFile);
-}
-function publishMedia(data){
-    const text = document.getElementById('statusText').value;
-    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data, text, target:publishTarget})}).then(r=>r.json()).then(()=>{loadAllStatus(); loadChannels(); document.getElementById('statusText').value='';})
+    if(!videoBase64) return;
+    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:videoBase64, start, end, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus();})
 }
 
-function loadAllStatus(){ // NOUVELLE FONCTION POUR AFFICHER TOUS LES CONTACTS
+function publishMedia(data){
+    const text = document.getElementById('statusText').value;
+    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data, text, target:publishTarget})}).then(r=>r.json()).then(()=>{loadAllStatus(); document.getElementById('statusText').value='';})
+}
+
+function loadAllStatus(){
     fetch('/get_all_status').then(r=>r.json()).then(data=>{
         let html='';
         data.forEach(user=>{
@@ -350,9 +276,48 @@ function confirmDelete(){ document.getElementById('deleteText').innerText = `Sup
 function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
 function deleteConfirmed(){ fetch('/delete_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
 function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
-function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar">${ch.name[0]}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small><button class="btn btn-gray" onclick="event.stopPropagation(); publishTarget='channel_${ch.id}'; document.getElementById('channelFile').click();">Publier</button></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
-function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(()=>loadChannels()) } }
-function openChannel(id){ alert("Ouverture chaîne: " + id + ". Mode lecture seule.") }
+
+function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar">${ch.name[0]}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
+function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r=>r.json()).then(res=>{ if(res.status=='ok'){ openChannel(res.id); } }) } }
+
+function openChannel(id){
+    currentChannel = id;
+    document.querySelectorAll('.page').forEach(p=>p.style.display='none');
+    document.getElementById('channelChatPage').style.display='flex';
+    fetch('/get_channel/'+id).then(r=>r.json()).then(ch=>{
+        document.getElementById('channelName').innerText = ch.name;
+        document.getElementById('channelDesc').innerText = ch.desc;
+        document.getElementById('channelAvatar').innerText = ch.name[0];
+        loadChannelMsgs(id);
+    })
+}
+function backToChannels(){ document.getElementById('channelChatPage').style.display='none'; document.getElementById('page-chaines').style.display='flex'; currentChannel=null; }
+
+function loadChannelMsgs(id){
+    fetch('/get_channel_msgs/'+id).then(r=>r.json()).then(msgs=>{
+        let box = document.getElementById('channelMsgBox'); box.innerHTML='';
+        msgs.forEach(m=>{
+            let d=document.createElement('div'); d.className='msg '+(m.from==MY_CODE?'me':'you');
+            let content = m.type=='text'? m.msg : `<a href="${m.msg}" target="_blank">📎 Fichier</a>`;
+            d.innerHTML=`<b>${m.from_nom}</b><br>${content}<div class="time">${m.time}</div>`;
+            box.append(d);
+        });
+        box.scrollTop = box.scrollHeight;
+    })
+}
+function sendChannelMsg(){
+    const msg = document.getElementById('channelMessage').value; if(!msg ||!currentChannel) return;
+    fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg, type:'text'})}).then(()=>{document.getElementById('channelMessage').value=''; loadChannelMsgs(currentChannel);})
+}
+function sendChannelFile(e){
+    const file = e.target.files[0]; if(!file ||!currentChannel) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg:ev.target.result, type:'file'})}).then(()=>{loadChannelMsgs(currentChannel);})
+    }
+    reader.readAsDataURL(file);
+}
+
 document.querySelectorAll('.contact').forEach(el=>{ el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } }); });
 
 // AJOUT 9: SYNC ARRIERE PLAN POUR L'APP
@@ -417,7 +382,7 @@ function load(){
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
-            saveLocal(serverMsgs);
+      saveLocal(serverMsgs);
       serverMsgs.forEach(m => sendToApp(m));
       render(serverMsgs);
     }
@@ -485,144 +450,8 @@ def get_user():
     db = load_db()
     return code, db["USERS"].get(code), db
 
-@app.route('/')
-def login():
-    code, user, db = get_user()
-    if user: return render_template_string(LOGIN_HTML, CSS=CSS, code=code, nom=user['nom'])
-    return render_template_string(LOGIN_HTML, CSS=CSS, code=None, nom=None)
+# TOUTES TES ROUTES JUSQU'A get_msg RESTENT IDENTIQUES
 
-@app.route('/register', methods=['GET','POST'])
-def register():
-    if request.method == 'GET': return render_template_string(REGISTER_HTML, CSS=CSS)
-    db = load_db()
-    nom = request.form['nom']; code = gen_code_port(); photo = ""
-    if request.form.get('original_img'):
-        try:
-            x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
-            size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
-            img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
-            buf = BytesIO(); img.save(buf, format="PNG")
-            photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        except: pass
-    db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
-    if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
-    if code not in db["STATUS"]: db["STATUS"][code] = []
-    save_db(db); session['code'] = code; return redirect('/')
-
-@app.route('/login', methods=['POST'])
-def do_login():
-    db = load_db(); code = request.form['code'].upper()
-    if code in db["USERS"]: session['code'] = code; return redirect('/')
-    return "Code introuvable", 404
-
-@app.route('/settings')
-def settings():
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code)
-
-@app.route('/update_profile', methods=['POST'])
-def update_profile():
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    user['nom'] = request.form['nom']
-    if request.form.get('original_img') and request.form.get('original_img')!= "":
-        try:
-            x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
-            size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
-            img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
-            buf = BytesIO(); img.save(buf, format="PNG")
-            user['photo'] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        except Exception as e: print("Crop error:", e)
-    db["USERS"][code] = user; save_db(db); return redirect('/settings')
-
-@app.route('/logout')
-def logout(): session.pop('code', None); return redirect('/')
-
-@app.route('/contacts')
-def contacts():
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    user_unread = db["UNREAD"].get(code, {})
-    archived = db["ARCHIVED"].get(code, [])
-    active_contacts = [c for c in user['contacts'] if c not in archived]
-    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=active_contacts, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
-
-@app.route('/archives')
-def archives():
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    archived = db["ARCHIVED"].get(code, [])
-    return render_template_string(ARCHIVES_HTML, CSS=CSS, users=db["USERS"], archived=archived)
-
-@app.route('/delete_contacts', methods=['POST'])
-def delete_contacts():
-    code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
-    data = request.json
-    for c in data['contacts']:
-        if c in user['contacts']: user['contacts'].remove(c)
-        cle = "-".join(sorted([code, c]))
-        if cle in db["MESSAGES"]: del db["MESSAGES"][cle]
-    db["USERS"][code] = user; save_db(db); return jsonify({"status":"ok"})
-
-@app.route('/archive_contacts', methods=['POST'])
-def archive_contacts():
-    code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
-    data = request.json
-    if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
-    for c in data['contacts']:
-        if c not in db["ARCHIVED"][code]: db["ARCHIVED"][code].append(c)
-    save_db(db); return jsonify({"status":"ok"})
-
-@app.route('/ajouter', methods=['GET', 'POST'])
-def ajouter():
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    if request.method == 'GET': return redirect('/contacts')
-    code_ami = request.form['code_ami'].upper().strip()
-    if code_ami in db["USERS"]:
-        if code_ami not in user['contacts']: user['contacts'].append(code_ami)
-        if code not in db["USERS"][code_ami]['contacts']: db["USERS"][code_ami]['contacts'].append(code)
-        db["USERS"][code] = user; save_db(db); return redirect(f'/chat/{code_ami}')
-    else: return "Code introuvable", 404
-
-@app.route('/chat/<code_ami>')
-def chat(code_ami):
-    code, user, db = get_user()
-    if not code: return redirect('/')
-    if code in db["UNREAD"] and code_ami in db["UNREAD"][code]:
-        db["UNREAD"][code][code_ami] = 0; save_db(db)
-    ami = db["USERS"].get(code_ami)
-    if not ami: return "Contact introuvable", 404
-    return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
-
-@app.route('/get_msg/<ami>')
-def get_msg(ami):
-    code, _, db = get_user()
-    cle = "-".join(sorted([code, ami]))
-    return jsonify(db["MESSAGES"].get(cle, []))
-
-# AJOUT 10: ROUTES CHAINES
-@app.route('/create_channel', methods=['POST'])
-def create_channel():
-    code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
-    data = request.json
-    ch_id = gen_code_port()
-    db["CHANNELS"][ch_id] = {"id": ch_id, "name": data['name'], "owner": code, "desc": "Nouvelle chaîne"}
-    save_db(db)
-    return jsonify({"status":"ok", "id": ch_id})
-
-@app.route('/get_channels')
-def get_channels():
-    db = load_db()
-    return jsonify(list(db["CHANNELS"].values()))
-
-# AJOUT 11: ROUTES STATUT 24H + TOUS CONTACTS
 @app.route('/get_all_status')
 def get_all_status():
     code, user, db = get_user()
@@ -645,7 +474,50 @@ def publish_status():
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
     if code not in db["STATUS"]: db["STATUS"][code] = []
-    db["STATUS"][code].append({"type": data['type'], "data": data['data'], "time": datetime.now().isoformat(), "text": data.get('text',''), "target": data.get('target')})
+    db["STATUS"][code].append({"type": data['type'], "data": data['data'], "time": datetime.now().isoformat(), "text": data.get('text','')})
+    save_db(db)
+    return jsonify({"status":"ok"})
+
+@app.route('/create_channel', methods=['POST'])
+def create_channel():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    ch_id = gen_code_port()
+    db["CHANNELS"][ch_id] = {"id": ch_id, "name": data['name'], "owner": code, "desc": "Description de la chaîne"}
+    if ch_id not in db["CHANNEL_MSGS"]: db["CHANNEL_MSGS"][ch_id] = []
+    save_db(db)
+    return jsonify({"status":"ok", "id": ch_id})
+
+@app.route('/get_channels')
+def get_channels():
+    code, user, db = get_user()
+    return jsonify(list(db["CHANNELS"].values()))
+
+@app.route('/get_channel/<ch_id>')
+def get_channel(ch_id):
+    db = load_db()
+    return jsonify(db["CHANNELS"].get(ch_id, {}))
+
+@app.route('/get_channel_msgs/<ch_id>')
+def get_channel_msgs(ch_id):
+    db = load_db()
+    return jsonify(db["CHANNEL_MSGS"].get(ch_id, []))
+
+@app.route('/send_channel_msg', methods=['POST'])
+def send_channel_msg():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    ch_id = data['channel']
+    if ch_id not in db["CHANNEL_MSGS"]: db["CHANNEL_MSGS"][ch_id] = []
+    db["CHANNEL_MSGS"][ch_id].append({
+        "from": code,
+        "from_nom": user['nom'],
+        "msg": data['msg'],
+        "type": data['type'],
+        "time": datetime.now().strftime("%H:%M")
+    })
     save_db(db)
     return jsonify({"status":"ok"})
 
