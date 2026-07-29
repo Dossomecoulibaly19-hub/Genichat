@@ -1,3 +1,6 @@
+import eventlet # AJOUT POUR RENDER
+eventlet.monkey_patch()
+
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
 from flask_socketio import SocketIO, emit, join_room, leave_room
 import json, os, base64, time, random, string, threading
@@ -7,7 +10,7 @@ from PIL import Image
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet') # MODIF POUR RENDER
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
@@ -17,7 +20,7 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             with open(DB_FILE) as f: return json.load(f)
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}} # AJOUT STATUS ICI SEULEMENT
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}} # AJOUT CHANNEL_MSGS
 
 def save_db(db):
     def _save():
@@ -31,7 +34,7 @@ def gen_code_port():
     db = load_db()
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if code not in db["USERS"]:
+        if code not in db["USERS"] and code not in db["CHANNELS"]: # MODIF: check channels aussi
             return code
 
 # AJOUT 1: NETTOYAGE STATUT 24H AUTO
@@ -79,7 +82,7 @@ body {background:#111B21; color:#E9EDEF;}
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
 h2{text-align:center; margin-bottom:15px; color:#00A884;}
 label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
-.mic-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; touch-action:none;} /* AJOUT 3: bloque menu copie */
+.mic-btn,.file-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; touch-action:none;} /* MODIF: AJOUT file-btn */
 .mic-btn.recording{background:red; animation: pulse 1s infinite;}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,0,0,0.7)} 70%{box-shadow:0 0 0 10px rgba(255,0,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,0,0,0)}}
 .audio-player{width:200px; height:40px;}
@@ -105,11 +108,12 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .status-contact.avatar{border:3px solid #2A3942;}
 .status-contact.has-status.avatar{border:3px solid #00A884;}
 .status-preview{width:60px; height:90px; border-radius:8px; background-size:cover; background-position:center; margin-left:auto;}
+.file-input-btn{display:inline-block; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer; margin:5px;} /* AJOUT POUR CHAINE */
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GenieChat</title><style>{{ CSS }}</style></head><body>
-<div class="box"><h2>👋 GenieChat</h2>
+<div class="box"><h2>😈 GenieChat</h2>
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
@@ -235,7 +239,6 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-chaines" class="page">
 <div style="padding:10px;"><input id="searchChannel" class="input" placeholder="Recher une chaîne"><button class="btn" onclick="createChannel()">+ Créer ma chaîne</button></div>
 <div id="channelsList" class="contact-list"></div>
-<input type="file" id="channelFile" accept="image/*,video/*" style="display:none;">
 </div>
 
 <div id="page-actu" class="page"><div class="editor-video"><h3>Actualités IA</h3><p>Résumé de tes messages non lus. Désactivé pour le moment.</p></div></div>
@@ -247,19 +250,32 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="nav-item" onclick="showPage('actu')"><span>📰</span>Actu</div>
 </div>
 
-<!-- AJOUT 6: MODAL EDITEUR VIDEO -->
+<!-- AJOUT 6: MODAL EDITEUR VIDEO CORRIGE -->
 <div class="crop-modal" id="videoEditorModal">
 <div class="video-editor">
 <video id="videoPreview" controls></video>
+<img id="imagePreview" style="max-width:100%; display:none;">
 <input type="text" id="statusText" class="input" placeholder="Écris un texte sur ton statut...">
-<label>Début: <input type="range" id="videoSliderStart" class="video-slider" min="0" value="0"></label>
-<label>Fin: <input type="range" id="videoSliderEnd" class="video-slider" min="100" value="100"></label>
 <div class="crop-buttons">
 <button class="btn btn-gray" onclick="closeVideoEditor()">Annuler</button>
-<button class="btn" onclick="publishVideo()">OK Publier</button>
+<button class="btn" onclick="publishMedia()">OK Publier</button> <!-- MODIF: publishMedia au lieu de publishVideo -->
 </div>
 </div>
 </div>
+
+<!-- AJOUT 7: PAGE CHAT CHAINE -->
+<div id="channelChatPage" class="page" style="display:none; height:100vh;">
+<div class="header"><button onclick="backToChannels()" style="background:none; border:none; color:white; font-size:24px;">←</button>
+<div class="avatar" id="channelAvatar" onclick="changeChannelPhoto()"></div>
+<div><b id="channelName"></b><br><small id="channelDesc" style="color:#8696A0;"></small></div></div>
+<div class="messages" id="channelMsgBox"></div>
+<div class="send-box">
+<label class="file-input-btn">📎<input type="file" id="channelFileInput" accept="image/*,video/*" style="display:none;"></label>
+<input type="text" id="channelMessage" placeholder="Écris un message" class="input">
+<button class="btn" style="width:60px;" onclick="sendChannelMsg()">➤</button>
+</div>
+</div>
+<input type="file" id="channelPhotoInput" accept="image/*" style="display:none;"> <!-- POUR PHOTO CHAINE -->
 
 <div class="popup" id="deletePopup">
 <div class="popup-box">
@@ -275,7 +291,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false;
-let videoFile, videoType, publishTarget; // AJOUT 7
+let mediaToPublish = null; let publishTarget = 'status'; let currentChannel = null; // CORRECTION 1: on garde le media en memoire
 
 socket.emit('join',{code:MY_CODE});
 
@@ -285,45 +301,38 @@ function showPage(page){
     document.getElementById('page-'+page).classList.add('active');
     event.currentTarget.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
-    if(page=='statut'){ loadAllStatus(); } // MODIF
+    if(page=='statut'){ loadAllStatus(); }
 }
 
-// AJOUT 8: EDITEUR VIDEO STATUT + CHAINE
-document.getElementById('statusFile').onchange = e => openVideoEditor(e, 'status');
-document.getElementById('channelFile').onchange = e => openVideoEditor(e, 'channel');
+// CORRECTION 1: EDITEUR VIDEO STATUT + CHAINE CORRIGE
+document.getElementById('statusFile').onchange = e => openMediaEditor(e, 'status');
 
-function openVideoEditor(e, target){
-    videoFile = e.target.files[0]; if(!videoFile) return;
+function openMediaEditor(e, target){
+    const file = e.target.files[0]; if(!file) return;
     publishTarget = target;
-    videoType = videoFile.type.startsWith('video')? 'video' : 'image';
     const reader = new FileReader();
     reader.onload = function(ev){
-        if(videoType == 'video'){
-            document.getElementById('videoPreview').src = ev.target.result;
-            document.getElementById('videoEditorModal').style.display='flex';
+        mediaToPublish = ev.target.result; // ON GARDE EN MEMOIRE
+        if(file.type.startsWith('video')){
+            document.getElementById('videoPreview').src = ev.target.result; document.getElementById('videoPreview').style.display='block';
+            document.getElementById('imagePreview').style.display='none';
         }else{
-            publishMedia(ev.target.result);
+            document.getElementById('imagePreview').src = ev.target.result; document.getElementById('imagePreview').style.display='block';
+            document.getElementById('videoPreview').style.display='none';
         }
+        document.getElementById('videoEditorModal').style.display='flex';
     }
-    reader.readAsDataURL(videoFile);
+    reader.readAsDataURL(file);
 }
-function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; document.getElementById('statusText').value=''; }
-function publishVideo(){
-    const start = document.getElementById('videoSliderStart').value;
-    const end = document.getElementById('videoSliderEnd').value;
+function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; mediaToPublish=null; document.getElementById('statusText').value=''; }
+function publishMedia(){ // CORRIGE: utilise mediaToPublish direct
+    if(!mediaToPublish) return;
     const text = document.getElementById('statusText').value;
-    const reader = new FileReader();
-    reader.onload = function(ev){
-        fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'video', data:ev.target.result, start, end, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus(); loadChannels();})
-    }
-    reader.readAsDataURL(videoFile);
-}
-function publishMedia(data){
-    const text = document.getElementById('statusText').value;
-    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type:'image', data, text, target:publishTarget})}).then(r=>r.json()).then(()=>{loadAllStatus(); loadChannels(); document.getElementById('statusText').value='';})
+    const type = mediaToPublish.startsWith('data:video')? 'video' : 'image';
+    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type, data:mediaToPublish, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus(); loadChannels();})
 }
 
-function loadAllStatus(){ // NOUVELLE FONCTION POUR AFFICHER TOUS LES CONTACTS
+function loadAllStatus(){
     fetch('/get_all_status').then(r=>r.json()).then(data=>{
         let html='';
         data.forEach(user=>{
@@ -350,9 +359,26 @@ function confirmDelete(){ document.getElementById('deleteText').innerText = `Sup
 function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
 function deleteConfirmed(){ fetch('/delete_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
 function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
-function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar">${ch.name[0]}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small><button class="btn btn-gray" onclick="event.stopPropagation(); publishTarget='channel_${ch.id}'; document.getElementById('channelFile').click();">Publier</button></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
-function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(()=>loadChannels()) } }
-function openChannel(id){ alert("Ouverture chaîne: " + id + ". Mode lecture seule.") }
+
+// CORRECTION 2: CHAINES COMPLETES
+function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar" style="background-image:url('${ch.photo||''}')">${!ch.photo?ch.name[0]:''}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
+function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r=>r.json()).then(res=>{ if(res.status=='ok'){ openChannel(res.id); } }) } }
+function openChannel(id){
+    currentChannel = id; document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.getElementById('channelChatPage').style.display='flex';
+    fetch('/get_channel/'+id).then(r=>r.json()).then(ch=>{
+        document.getElementById('channelName').innerText = ch.name;
+        document.getElementById('channelDesc').innerText = ch.desc;
+        document.getElementById('channelAvatar').style.backgroundImage = `url(${ch.photo})`;
+        loadChannelMsgs(id);
+    })
+}
+function backToChannels(){ document.getElementById('channelChatPage').style.display='none'; document.getElementById('page-chaines').classList.add('active'); currentChannel=null; }
+function loadChannelMsgs(id){ fetch('/get_channel_msgs/'+id).then(r=>r.json()).then(msgs=>{ let box = document.getElementById('channelMsgBox'); box.innerHTML=''; msgs.forEach(m=>{ let d=document.createElement('div'); d.className='msg '+(m.from==MY_CODE?'me':'you'); let content = m.type=='text'? m.msg : `<a href="${m.msg}" target="_blank">📎 Fichier</a>`; d.innerHTML=`<b>${m.from_nom}</b><br>${content}<div class="time">${m.time}</div>`; box.append(d); }); box.scrollTop = box.scrollHeight; }) }
+function sendChannelMsg(){ const msg = document.getElementById('channelMessage').value; if(!msg ||!currentChannel) return; fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg, type:'text'})}).then(()=>{document.getElementById('channelMessage').value=''; loadChannelMsgs(currentChannel);}) }
+document.getElementById('channelFileInput').onchange = e => { const file=e.target.files[0]; if(!file||!currentChannel) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg:ev.target.result, type:'file'})}).then(()=>loadChannelMsgs(currentChannel)); } reader.readAsDataURL(file); }
+function changeChannelPhoto(){ document.getElementById('channelPhotoInput').click(); }
+document.getElementById('channelPhotoInput').onchange = e => { const file=e.target.files[0]; if(!file||!currentChannel) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/update_channel_photo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:currentChannel, photo:ev.target.result})}).then(()=>openChannel(currentChannel)); } reader.readAsDataURL(file); }
+
 document.querySelectorAll('.contact').forEach(el=>{ el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } }); });
 
 // AJOUT 9: SYNC ARRIERE PLAN POUR L'APP
@@ -379,6 +405,7 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <div><b>{{ ami.nom }}</b><br><small style="color:#8696A0;">{{ code_ami }}</small></div></div>
 <div class="messages" id="msgBox"></div>
 <form class="send-box" id="sendForm">
+<label class="file-btn">📎<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label> <!-- AJOUT BOUTON FICHIER -->
 <input type="text" id="message" placeholder="Écris un message" class="input">
 <button id="micBtn" type="button" class="mic-btn">🎤</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
@@ -417,7 +444,7 @@ function load(){
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
-            saveLocal(serverMsgs);
+      saveLocal(serverMsgs);
       serverMsgs.forEach(m => sendToApp(m));
       render(serverMsgs);
     }
@@ -439,6 +466,17 @@ sendData(data);
 msgInput.value='';sendBtn.style.display='none';micBtn.style.display='block';}
 
 msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'block';}
+
+// AJOUT 3: ENVOI IMAGE/VIDEO DANS CHAT
+document.getElementById('chatFileInput').onchange = e => {
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        sendData({to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:ev.target.result,time:t,id:'m'+Date.now(),type:'file'});
+    }
+    reader.readAsDataURL(file);
+}
 
 micBtn.onmousedown=micBtn.ontouchstart=async()=>{
   micBtn.classList.add('recording');
@@ -467,7 +505,7 @@ micBtn.onmouseup=micBtn.ontouchend=()=>{
 function addMsg(from,msg,me,time,status,id,type='text'){
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
   let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
-  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : msg;
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? `<a href="${msg}" target="_blank">📎 Fichier</a>` : msg;
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
@@ -606,14 +644,15 @@ def get_msg(ami):
     cle = "-".join(sorted([code, ami]))
     return jsonify(db["MESSAGES"].get(cle, []))
 
-# AJOUT 10: ROUTES CHAINES
+# AJOUT 10: ROUTES CHAINES COMPLETES
 @app.route('/create_channel', methods=['POST'])
 def create_channel():
     code, user, db = get_user()
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
     ch_id = gen_code_port()
-    db["CHANNELS"][ch_id] = {"id": ch_id, "name": data['name'], "owner": code, "desc": "Nouvelle chaîne"}
+    db["CHANNELS"][ch_id] = {"id": ch_id, "name": data['name'], "owner": code, "desc": "Description de la chaîne", "photo": ""}
+    if ch_id not in db["CHANNEL_MSGS"]: db["CHANNEL_MSGS"][ch_id] = []
     save_db(db)
     return jsonify({"status":"ok", "id": ch_id})
 
@@ -621,6 +660,42 @@ def create_channel():
 def get_channels():
     db = load_db()
     return jsonify(list(db["CHANNELS"].values()))
+
+@app.route('/get_channel/<ch_id>')
+def get_channel(ch_id):
+    db = load_db()
+    return jsonify(db["CHANNELS"].get(ch_id, {}))
+
+@app.route('/update_channel_photo', methods=['POST'])
+def update_channel_photo():
+    db = load_db()
+    data = request.json
+    if data['id'] in db["CHANNELS"]:
+        db["CHANNELS"][data['id']]['photo'] = data['photo']
+        save_db(db)
+    return jsonify({"status":"ok"})
+
+@app.route('/get_channel_msgs/<ch_id>')
+def get_channel_msgs(ch_id):
+    db = load_db()
+    return jsonify(db["CHANNEL_MSGS"].get(ch_id, []))
+
+@app.route('/send_channel_msg', methods=['POST'])
+def send_channel_msg():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    ch_id = data['channel']
+    if ch_id not in db["CHANNEL_MSGS"]: db["CHANNEL_MSGS"][ch_id] = []
+    db["CHANNEL_MSGS"][ch_id].append({
+        "from": code,
+        "from_nom": user['nom'],
+        "msg": data['msg'],
+        "type": data['type'],
+        "time": datetime.now().strftime("%H:%M")
+    })
+    save_db(db)
+    return jsonify({"status":"ok"})
 
 # AJOUT 11: ROUTES STATUT 24H + TOUS CONTACTS
 @app.route('/get_all_status')
@@ -671,4 +746,5 @@ def handle_send(data):
     emit('new_message_alert', {}, room=dest)
 
 if __name__=='__main__':
-    socketio.run(app,host='0.0.0.0',port=10000)
+    port = int(os.environ.get("PORT", 10000)) # MODIF POUR RENDER
+    socketio.run(app,host='0.0.0.0',port=port)
