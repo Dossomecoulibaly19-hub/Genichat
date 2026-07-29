@@ -244,10 +244,10 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-actu" class="page"><div class="editor-video"><h3>Actualités IA</h3><p>Résumé de tes messages non lus. Désactivé pour le moment.</p></div></div>
 
 <div class="bottom-nav">
-<div class="nav-item active" onclick="showPage('contacts')"><span>💬</span>Accueil</div>
-<div class="nav-item" onclick="showPage('statut')"><span>⭕</span>Statut</div>
-<div class="nav-item" onclick="showPage('chaines')"><span>📢</span>Chaînes</div>
-<div class="nav-item" onclick="showPage('actu')"><span>📰</span>Actu</div>
+<div class="nav-item active" onclick="showPage(event, 'contacts')"><span>💬</span>Accueil</div> <!-- CORRECTION: AJOUT event -->
+<div class="nav-item" onclick="showPage(event, 'statut')"><span>⭕</span>Statut</div>
+<div class="nav-item" onclick="showPage(event, 'chaines')"><span>📢</span>Chaînes</div>
+<div class="nav-item" onclick="showPage(event, 'actu')"><span>📰</span>Actu</div>
 </div>
 
 <!-- AJOUT 6: MODAL EDITEUR VIDEO CORRIGE -->
@@ -295,11 +295,12 @@ let mediaToPublish = null; let publishTarget = 'status'; let currentChannel = nu
 
 socket.emit('join',{code:MY_CODE});
 
-function showPage(page){
+// CORRECTION CRITIQUE: AJOUT event en parametre
+function showPage(event, page){
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
     document.getElementById('page-'+page).classList.add('active');
-    event.currentTarget.classList.add('active');
+    event.currentTarget.classList.add('active'); // Maintenant event existe
     if(page=='chaines'){ loadChannels(); }
     if(page=='statut'){ loadAllStatus(); }
 }
