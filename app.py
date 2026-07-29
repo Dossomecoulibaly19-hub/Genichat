@@ -11,26 +11,24 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
-db_lock = threading.Lock() # AJOUT: Evite que 2 requetes ecrivent en meme temps
+db_lock = threading.Lock()
 
 def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             with open(DB_FILE) as f: return json.load(f)
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}}
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}}
 
 def save_db(db):
-    # AJOUT: Sauvegarde en arrière plan pour ne pas bloquer
     def _save():
         with db_lock:
             tmp = DB_FILE + ".tmp"
-            with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':')) # plus rapide, moins lourd
+            with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':'))
             os.replace(tmp, DB_FILE)
     threading.Thread(target=_save, daemon=True).start()
 
 def gen_code_port():
     db = load_db()
-    # AJOUT: Boucle jusqu'a trouver un code unique. Evite les doublons
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         if code not in db["USERS"]:
@@ -39,7 +37,10 @@ def gen_code_port():
 CSS = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif;}
 body {background:#111B21; color:#E9EDEF;}
 .header {background:#202C33; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10;}
+.header-actions{display:flex; gap:15px;}
+.header-actions button{background:none; border:none; color:white; font-size:16px; cursor:pointer; font-weight:600;}
 .btn {background:#00A884; color:white; border:none; padding:14px 15px; border-radius:10px; cursor:pointer; font-weight:600; width:100%; margin-top:12px; font-size:16px; text-decoration:none; display:block; text-align:center;}
+.btn-danger {background:#D93025;}
 .btn-gray {background:#2A3942;}
 .input {padding:14px; border:none; border-radius:10px; background:#2A3942; color:white; width:100%; margin-top:6px; font-size:16px;}
 .form-group {margin-bottom:15px;}
@@ -48,7 +49,8 @@ body {background:#111B21; color:#E9EDEF;}
 .box {background:#202C33; padding:25px; border-radius:20px; max-width:450px; margin:30px auto; width:90%; box-shadow:0 4px 20px rgba(0,0,0,0.3);}
 .code-info {padding:14px; background:#000; font-size:20px; color:#00A884; border-radius:10px; text-align:center; letter-spacing:4px; font-weight:bold; margin:10px 0; user-select:all;}
 .contact-list {flex:1; overflow-y:auto;}
-.contact{padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer; border-bottom:1px solid #2A3942; position:relative;}
+.contact{padding:14px 16px; display:flex; align-items:center; gap:14px; cursor:pointer; border-bottom:1px solid #2A3942; position:relative; user-select:none;}
+.contact.selected{background:#2A3942;}
 .contact:hover{background:#2A3942;}
 .contact-info{flex:1;}
 .add-bar{padding:10px; background:#202C33; display:flex; gap:10px; position:sticky; bottom:0;}
@@ -72,6 +74,9 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,0,0,0.7)} 70%{box-shadow:0 0 0 10px rgba(255,0,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,0,0,0)}}
 .audio-player{width:200px; height:40px;}
 .badge{background:#00A884; color:white; border-radius:50%; min-width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold; padding:2px 6px;}
+.popup {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; justify-content:center; align-items:center;}
+.popup-box {background:#202C33; padding:25px; border-radius:15px; width:90%; max-width:350px; text-align:center;}
+.popup-buttons {display:flex; gap:10px; margin-top:20px;}
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -165,27 +170,112 @@ function saveCrop(){document.getElementById('crop_x').value=posX;document.getEle
 
 CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chats</title><style>{{ CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
-<div class="header"><h2>Chats</h2><a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a></div>
+<div class="header" id="mainHeader">
+<h2>Chats</h2>
+<div class="header-actions">
+<a href="/archives" style="color:white; text-decoration:none;">📦</a>
+<a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a>
+</div>
+</div>
+
+<div class="header" id="selectionHeader" style="display:none; background:#D93025;">
+<button onclick="deselectAll()">✕</button>
+<h2 id="selectedCount">0 sélectionné</h2>
+<div class="header-actions">
+<button onclick="archiveSelected()">Archiver</button>
+<button onclick="confirmDelete()">Supprimer</button>
+</div>
+</div>
+
 <div class="contact-list" id="contact-list">{% for c in contacts %}
-<div class="contact" onclick="location='/chat/{{ c }}'">
+<div class="contact" data-code="{{ c }}" oncontextmenu="selectContact('{{ c }}'); return false;" ontouchstart="handleTouchStart(event, '{{ c }}')" ontouchend="handleTouchEnd()">
 <div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ '' if users[c].photo else users[c].nom[0]|upper }}</div>
 <div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 {% if unread.get(c, 0) > 0 %}<div class="badge">{{ unread[c] }}</div>{% endif %}
 </div>{% endfor %}</div>
+
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;">
 <input name="code_ami" placeholder="Entrer CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
+
+<div class="popup" id="deletePopup">
+<div class="popup-box">
+<h3>Supprimer le contact?</h3>
+<p id="deleteText">Cette action va supprimer le contact et tous les messages.</p>
+<div class="popup-buttons">
+<button class="btn btn-gray" onclick="closePopup()">Annuler</button>
+<button class="btn btn-danger" onclick="deleteConfirmed()">Supprimer</button>
+</div>
+</div>
+</div>
+
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
+let selectedContacts = []; let longPressTimer;
+
 socket.emit('join',{code:MY_CODE});
 
-// AJOUT: Fonction pour envoyer à l'app Android
-function sendToApp(data){
-  if(window.Android){
-    Android.saveMessage(JSON.stringify(data));
-  }
+function handleTouchStart(e, code){
+    longPressTimer = setTimeout(()=>{ selectContact(code); }, 500);
+}
+function handleTouchEnd(){ clearTimeout(longPressTimer); }
+
+function selectContact(code){
+    const el = document.querySelector(`[data-code="${code}"]`);
+    if(!el) return;
+    if(selectedContacts.includes(code)){
+        selectedContacts = selectedContacts.filter(c=>c!=code);
+        el.classList.remove('selected');
+    } else {
+        selectedContacts.push(code);
+        el.classList.add('selected');
+    }
+    updateSelectionHeader();
 }
 
-// SYNC AUTO: Sauvegarde tous les messages dans localStorage + App
+function updateSelectionHeader(){
+    if(selectedContacts.length > 0){
+        document.getElementById('mainHeader').style.display='none';
+        document.getElementById('selectionHeader').style.display='flex';
+        document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné';
+    } else {
+        deselectAll();
+    }
+}
+
+function deselectAll(){
+    selectedContacts = [];
+    document.querySelectorAll('.contact.selected').forEach(el=>el.classList.remove('selected'));
+    document.getElementById('mainHeader').style.display='flex';
+    document.getElementById('selectionHeader').style.display='none';
+}
+
+function confirmDelete(){
+    document.getElementById('deleteText').innerText = `Supprimer ${selectedContacts.length} contact(s) et tous leurs messages?`;
+    document.getElementById('deletePopup').style.display='flex';
+}
+
+function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
+
+function deleteConfirmed(){
+    fetch('/delete_contacts', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({contacts: selectedContacts})
+    }).then(()=>{ location.reload(); });
+}
+
+function archiveSelected(){
+    fetch('/archive_contacts', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({contacts: selectedContacts})
+    }).then(()=>{ location.reload(); });
+}
+
+function sendToApp(data){
+  if(window.Android){ Android.saveMessage(JSON.stringify(data)); }
+}
+
 function syncMessages(){
   {% for c in contacts %}
   fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{
@@ -195,8 +285,22 @@ function syncMessages(){
   {% endfor %}
 }
 syncMessages();
-socket.on('new_message_alert', ()=>{ syncMessages(); location.reload(); });
+socket.on('new_message_alert', ()=>{ syncMessages(); });
+
+document.querySelectorAll('.contact').forEach(el=>{
+    el.addEventListener('click', ()=>{ if(selectedContacts.length==0){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } });
+});
 </script>
+</body></html>"""
+
+ARCHIVES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Archives</title><style>{{ CSS }}</style></head><body style="display:flex; flex-direction:column; height:100vh;">
+<div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Archives</h2><div></div></div>
+<div class="contact-list" id="contact-list">{% for c in archived %}
+<div class="contact" onclick="location='/chat/{{ c }}'">
+<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ '' if users[c].photo else users[c].nom[0]|upper }}</div>
+<div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
+</div>{% endfor %}</div>
 </body></html>"""
 
 CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -219,7 +323,6 @@ const msgInput = document.getElementById('message');
 
 socket.on('connect',()=>socket.emit('join',{code:MY_CODE}));
 
-// AJOUT: Fonction pont vers Android
 function sendToApp(data){
   if(window.Android){
     Android.saveMessage(JSON.stringify({
@@ -246,16 +349,16 @@ function load(){
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
       saveLocal(serverMsgs);
-      serverMsgs.forEach(m => sendToApp(m)); // AJOUT: Sauvegarde dans App
+      serverMsgs.forEach(m => sendToApp(m));
       render(serverMsgs);
     }
-  }).catch(()=>{}); // Si serveur down on garde local
+  }).catch(()=>{});
 }
 load();
 
 function sendData(data){
   let local = loadLocal(); local.push(data); saveLocal(local);
-  sendToApp(data); // AJOUT: Sauvegarde dans App direct
+  sendToApp(data);
   addMsg(data.from_nom,data.msg,true,data.time,data.status,data.id,data.type); scroll();
   socket.emit('send_message',data);
 }
@@ -271,7 +374,7 @@ msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBt
 micBtn.onmousedown=micBtn.ontouchstart=async()=>{
   micBtn.classList.add('recording');
   const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-  mediaRecorder = new MediaRecorder(stream);
+  mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
   audioChunks = [];
   mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
   mediaRecorder.onstop=()=>{
@@ -302,7 +405,7 @@ function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.sc
 socket.on('receive_message',d=>{
     if(d.from==AMI_CODE){
       let local = loadLocal(); local.push(d); saveLocal(local);
-      sendToApp(d); // AJOUT: Sauvegarde dans App
+      sendToApp(d);
       addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
     }
 });
@@ -334,6 +437,7 @@ def register():
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
+    if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
     save_db(db); session['code'] = code; return redirect('/')
 
 @app.route('/login', methods=['POST'])
@@ -372,7 +476,37 @@ def contacts():
     code, user, db = get_user()
     if not code: return redirect('/')
     user_unread = db["UNREAD"].get(code, {})
-    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=user['contacts'], unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+    archived = db["ARCHIVED"].get(code, [])
+    active_contacts = [c for c in user['contacts'] if c not in archived]
+    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=active_contacts, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+
+@app.route('/archives')
+def archives():
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    archived = db["ARCHIVED"].get(code, [])
+    return render_template_string(ARCHIVES_HTML, CSS=CSS, users=db["USERS"], archived=archived)
+
+@app.route('/delete_contacts', methods=['POST'])
+def delete_contacts():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    for c in data['contacts']:
+        if c in user['contacts']: user['contacts'].remove(c)
+        cle = "-".join(sorted([code, c]))
+        if cle in db["MESSAGES"]: del db["MESSAGES"][cle]
+    db["USERS"][code] = user; save_db(db); return jsonify({"status":"ok"})
+
+@app.route('/archive_contacts', methods=['POST'])
+def archive_contacts():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
+    for c in data['contacts']:
+        if c not in db["ARCHIVED"][code]: db["ARCHIVED"][code].append(c)
+    save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
@@ -418,7 +552,7 @@ def handle_send(data):
     if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
     db["UNREAD"][dest][src] += 1
 
-    save_db(db) # Maintenant c'est en thread, ne bloque plus
+    save_db(db)
 
     emit('receive_message', data, room=dest)
     emit('new_message_alert', {}, room=dest)
