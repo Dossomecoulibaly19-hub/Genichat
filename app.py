@@ -20,7 +20,7 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             with open(DB_FILE) as f: return json.load(f)
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}} # AJOUT CHANNEL_MSGS
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}}
 
 def save_db(db):
     def _save():
@@ -34,10 +34,10 @@ def gen_code_port():
     db = load_db()
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if code not in db["USERS"] and code not in db["CHANNELS"]: # MODIF: check channels aussi
+        if code not in db["USERS"] and code not in db["CHANNELS"]:
             return code
 
-# AJOUT 1: NETTOYAGE STATUT 24H AUTO
+# NETTOYAGE STATUT 24H AUTO
 def clean_status():
     db = load_db()
     now = datetime.now()
@@ -46,7 +46,7 @@ def clean_status():
     save_db(db)
 threading.Timer(3600, clean_status).start() # toutes les 1h
 
-CSS = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif; -webkit-user-select:none; user-select:none;} /* AJOUT 2: bloque selection */
+CSS = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif; -webkit-user-select:none; user-select:none;}
 body {background:#111B21; color:#E9EDEF;}
 .header {background:#202C33; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10;}
 .header-actions{display:flex; gap:15px;}
@@ -77,12 +77,12 @@ body {background:#111B21; color:#E9EDEF;}
 .crop-modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:99; flex-direction:column; justify-content:center; align-items:center;}
 .crop-area {position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center; overflow:hidden; touch-action:none;}
 .crop-circle {position:absolute; width:200px; height:200px; border:4px solid #00A884; border-radius:50%; box-shadow:0 0 0 9999px rgba(0,0,0,0.8); pointer-events:none;}
-.crop-square {border-radius:0;} /* AJOUT POUR STATUT RECTANGLE */
+.crop-square {border-radius:0;}
 .crop-img {position:absolute; cursor:grab; max-width:none; left:50%; top:50%; touch-action:none; user-select:none;}
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
 h2{text-align:center; margin-bottom:15px; color:#00A884;}
 label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
-.mic-btn,.file-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; touch-action:none;} /* MODIF: AJOUT file-btn */
+.mic-btn,.file-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; touch-action:none;}
 .mic-btn.recording{background:red; animation: pulse 1s infinite;}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,0,0,0.7)} 70%{box-shadow:0 0 0 10px rgba(255,0,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,0,0,0)}}
 .audio-player{width:200px; height:40px;}
@@ -90,7 +90,6 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .popup {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; justify-content:center; align-items:center;}
 .popup-box {background:#202C33; padding:25px; border-radius:15px; width:90%; max-width:350px; text-align:center;}
 .popup-buttons {display:flex; gap:10px; margin-top:20px;}
-/* AJOUT 4: BARRE BAS + PAGES */
 .bottom-nav{display:flex; background:#202C33; justify-content:space-around; padding:8px 0; position:sticky; bottom:0; z-index:20;}
 .nav-item{flex:1; text-align:center; color:#8696A0; font-size:12px; cursor:pointer; padding:5px;}
 .nav-item.active{color:#00A884;}
@@ -98,17 +97,27 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .page{display:none; flex:1; flex-direction:column; height:calc(100vh - 120px);}
 .page.active{display:flex;}
 .editor-video{padding:20px; text-align:center; color:#8696A0;}
-.channel-card{background:#2A3942; padding:15px; margin:10px; border-radius:10px; display:flex; gap:10px; align-items:center;}
-/* AJOUT 5: VIDEO EDITOR + STATUT */
+.channel-card{background:#2A3942; padding:15px; margin:10px; border-radius:10px; display:flex; gap:10px; align-items:center; cursor:pointer;}
 .video-editor{padding:10px; text-align:center;}
 .video-editor video{width:100%; max-height:60vh; background:#000;}
 .video-slider{width:100%; margin:10px 0;}
-.status-list{display:flex; flex-direction:column; padding:10px; gap:5px; overflow-y:auto;} /* MODIF POUR LISTE CONTACTS */
+.status-list{display:flex; flex-direction:column; padding:10px; gap:5px; overflow-y:auto;}
 .status-contact{display:flex; align-items:center; gap:10px; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer;}
 .status-contact.avatar{border:3px solid #2A3942;}
 .status-contact.has-status.avatar{border:3px solid #00A884;}
 .status-preview{width:60px; height:90px; border-radius:8px; background-size:cover; background-position:center; margin-left:auto;}
-.file-input-btn{display:inline-block; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer; margin:5px;} /* AJOUT POUR CHAINE */
+.file-input-btn{display:inline-block; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer; margin:5px;}
+/* VISIONNEUSE STATUT WHATSAPP */
+.status-viewer{display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:200; flex-direction:column;}
+.status-header{padding:10px; display:flex; align-items:center; gap:10px; background:rgba(0,0,0,0.5);}
+.status-progress{display:flex; gap:3px; padding:5px 10px;}
+.status-bar{flex:1; height:3px; background:#555; border-radius:2px;}
+.status-bar.active{background:#00A884;}
+.status-content{flex:1; display:flex; align-items:center; justify-content:center;}
+.status-content img,.status-content video{max-width:100%; max-height:100%;}
+.status-text{position:absolute; bottom:80px; width:100%; text-align:center; color:white; font-size:18px; padding:0 20px;}
+.status-nav{position:absolute; top:50%; width:100%; display:flex; justify-content:space-between; padding:0 10px;}
+.status-nav button{background:rgba(255,255,255,0.2); border:none; color:white; font-size:30px; width:40px; height:40px; border-radius:50%;}
 """
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -237,20 +246,22 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>
 
 <div id="page-chaines" class="page">
-<div style="padding:10px;"><input id="searchChannel" class="input" placeholder="Recher une chaîne"><button class="btn" onclick="createChannel()">+ Créer ma chaîne</button></div>
+<div style="padding:10px; display:flex; gap:10px;">
+<input id="searchChannel" class="input" placeholder="Recher une chaîne">
+<button class="btn" style="width:60px;" onclick="createChannel()">+</button>
+</div>
 <div id="channelsList" class="contact-list"></div>
 </div>
 
 <div id="page-actu" class="page"><div class="editor-video"><h3>Actualités IA</h3><p>Résumé de tes messages non lus. Désactivé pour le moment.</p></div></div>
 
 <div class="bottom-nav">
-<div class="nav-item active" onclick="showPage(event, 'contacts')"><span>💬</span>Accueil</div> <!-- CORRECTION: AJOUT event -->
+<div class="nav-item active" onclick="showPage(event, 'contacts')"><span>💬</span>Accueil</div>
 <div class="nav-item" onclick="showPage(event, 'statut')"><span>⭕</span>Statut</div>
 <div class="nav-item" onclick="showPage(event, 'chaines')"><span>📢</span>Chaînes</div>
 <div class="nav-item" onclick="showPage(event, 'actu')"><span>📰</span>Actu</div>
 </div>
 
-<!-- AJOUT 6: MODAL EDITEUR VIDEO CORRIGE -->
 <div class="crop-modal" id="videoEditorModal">
 <div class="video-editor">
 <video id="videoPreview" controls></video>
@@ -258,12 +269,11 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <input type="text" id="statusText" class="input" placeholder="Écris un texte sur ton statut...">
 <div class="crop-buttons">
 <button class="btn btn-gray" onclick="closeVideoEditor()">Annuler</button>
-<button class="btn" onclick="publishMedia()">OK Publier</button> <!-- MODIF: publishMedia au lieu de publishVideo -->
+<button class="btn" onclick="publishMedia()">OK Publier</button>
 </div>
 </div>
 </div>
 
-<!-- AJOUT 7: PAGE CHAT CHAINE -->
 <div id="channelChatPage" class="page" style="display:none; height:100vh;">
 <div class="header"><button onclick="backToChannels()" style="background:none; border:none; color:white; font-size:24px;">←</button>
 <div class="avatar" id="channelAvatar" onclick="changeChannelPhoto()"></div>
@@ -275,7 +285,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <button class="btn" style="width:60px;" onclick="sendChannelMsg()">➤</button>
 </div>
 </div>
-<input type="file" id="channelPhotoInput" accept="image/*" style="display:none;"> <!-- POUR PHOTO CHAINE -->
+<input type="file" id="channelPhotoInput" accept="image/*" style="display:none;">
 
 <div class="popup" id="deletePopup">
 <div class="popup-box">
@@ -288,24 +298,38 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>
 </div>
 
+<div class="status-viewer" id="statusViewer">
+<div class="status-progress" id="statusProgress"></div>
+<div class="status-header">
+<button onclick="closeStatusViewer()" style="background:none; border:none; color:white; font-size:24px;">←</button>
+<div class="avatar" id="statusUserAvatar"></div>
+<div><b id="statusUserName"></b></div>
+</div>
+<div class="status-content" id="statusContent"></div>
+<div class="status-text" id="statusText"></div>
+<div class="status-nav">
+<button onclick="prevStatus()">‹</button>
+<button onclick="nextStatus()">›</button>
+</div>
+</div>
+
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false;
-let mediaToPublish = null; let publishTarget = 'status'; let currentChannel = null; // CORRECTION 1: on garde le media en memoire
+let mediaToPublish = null; let publishTarget = 'status'; let currentChannel = null;
+let currentStatusUser = []; let currentStatusIndex = 0;
 
 socket.emit('join',{code:MY_CODE});
 
-// CORRECTION CRITIQUE: AJOUT event en parametre
 function showPage(event, page){
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
     document.getElementById('page-'+page).classList.add('active');
-    event.currentTarget.classList.add('active'); // Maintenant event existe
+    event.currentTarget.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
     if(page=='statut'){ loadAllStatus(); }
 }
 
-// CORRECTION 1: EDITEUR VIDEO STATUT + CHAINE CORRIGE
 document.getElementById('statusFile').onchange = e => openMediaEditor(e, 'status');
 
 function openMediaEditor(e, target){
@@ -313,7 +337,7 @@ function openMediaEditor(e, target){
     publishTarget = target;
     const reader = new FileReader();
     reader.onload = function(ev){
-        mediaToPublish = ev.target.result; // ON GARDE EN MEMOIRE
+        mediaToPublish = ev.target.result;
         if(file.type.startsWith('video')){
             document.getElementById('videoPreview').src = ev.target.result; document.getElementById('videoPreview').style.display='block';
             document.getElementById('imagePreview').style.display='none';
@@ -326,11 +350,11 @@ function openMediaEditor(e, target){
     reader.readAsDataURL(file);
 }
 function closeVideoEditor(){ document.getElementById('videoEditorModal').style.display='none'; mediaToPublish=null; document.getElementById('statusText').value=''; }
-function publishMedia(){ // CORRIGE: utilise mediaToPublish direct
+function publishMedia(){
     if(!mediaToPublish) return;
     const text = document.getElementById('statusText').value;
     const type = mediaToPublish.startsWith('data:video')? 'video' : 'image';
-    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type, data:mediaToPublish, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus(); loadChannels();})
+    fetch('/publish_status', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({type, data:mediaToPublish, text, target:publishTarget})}).then(r=>r.json()).then(()=>{closeVideoEditor(); loadAllStatus();})
 }
 
 function loadAllStatus(){
@@ -341,14 +365,42 @@ function loadAllStatus(){
             let preview = hasStatus? user.status[0].data : '';
             html+=`<div class="status-contact ${hasStatus?'has-status':''}" onclick="viewStatus('${user.code}')">
                 <div class="avatar" style="background-image:url('${user.photo}')">${user.photo?'':user.nom[0]}</div>
-                <div class="contact-info"><b>${user.nom}</b><br><small>${hasStatus?'Voir statut':'Aucun statut'}</small></div>
+                <div class="contact-info"><b>${user.nom}</b><br><small>${hasStatus?'Nouveau statut':'Aucun statut'}</small></div>
                 ${hasStatus?`<div class="status-preview" style="background-image:url(${preview})"></div>`:''}
             </div>`
         });
         document.getElementById('statusList').innerHTML=html || '<p style="padding:20px; text-align:center;">Ajoute des contacts pour voir leurs statuts</p>';
     })
 }
-function viewStatus(code){ alert('Ouverture des statuts de: '+code) }
+
+function viewStatus(code){
+    fetch('/get_all_status').then(r=>r.json()).then(data=>{
+        currentStatusUser = data.find(u=>u.code==code);
+        if(!currentStatusUser || currentStatusUser.status.length==0) return;
+        currentStatusIndex = 0;
+        document.getElementById('statusUserName').innerText = currentStatusUser.nom;
+        document.getElementById('statusUserAvatar').style.backgroundImage = `url(${currentStatusUser.photo})`;
+        document.getElementById('statusViewer').style.display='flex';
+        showStatus();
+    })
+}
+function showStatus(){
+    let s = currentStatusUser.status[currentStatusIndex];
+    let content = document.getElementById('statusContent');
+    if(s.type=='video'){
+        content.innerHTML = `<video src="${s.data}" autoplay muted></video>`;
+    }else{
+        content.innerHTML = `<img src="${s.data}">`;
+    }
+    document.getElementById('statusText').innerText = s.text || '';
+    let bars = '';
+    currentStatusUser.status.forEach((_,i)=>{ bars += `<div class="status-bar ${i==currentStatusIndex?'active':''}"></div>` });
+    document.getElementById('statusProgress').innerHTML = bars;
+    setTimeout(()=>{ nextStatus(); }, 5000);
+}
+function nextStatus(){ if(currentStatusIndex < currentStatusUser.status.length-1){ currentStatusIndex++; showStatus(); } else { closeStatusViewer(); } }
+function prevStatus(){ if(currentStatusIndex > 0){ currentStatusIndex--; showStatus(); } }
+function closeStatusViewer(){ document.getElementById('statusViewer').style.display='none'; }
 
 function startLongPress(code){ longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
 function endLongPress(){ clearTimeout(longPressTimer); }
@@ -361,8 +413,7 @@ function closePopup(){ document.getElementById('deletePopup').style.display='non
 function deleteConfirmed(){ fetch('/delete_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
 function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({contacts: selectedContacts})}).then(()=>{ location.reload(); }); }
 
-// CORRECTION 2: CHAINES COMPLETES
-function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar" style="background-image:url('${ch.photo||''}')">${!ch.photo?ch.name[0]:''}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Aucune chaîne</p>'; }) }
+function loadChannels(){ fetch('/get_channels').then(r=>r.json()).then(data=>{ let html=''; data.forEach(ch=>{ html+=`<div class="channel-card" onclick="openChannel('${ch.id}')"><div class="avatar" style="background-image:url('${ch.photo||''}')">${!ch.photo?ch.name[0]:''}</div><div><b>${ch.name}</b><br><small>${ch.desc}</small></div></div>` }); document.getElementById('channelsList').innerHTML=html || '<p style="text-align:center; padding:20px;">Clique + pour créer ta chaîne</p>'; }) }
 function createChannel(){ let name=prompt("Nom de ta chaîne:"); if(name){ fetch('/create_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})}).then(r=>r.json()).then(res=>{ if(res.status=='ok'){ openChannel(res.id); } }) } }
 function openChannel(id){
     currentChannel = id; document.querySelectorAll('.page').forEach(p=>p.classList.remove('active')); document.getElementById('channelChatPage').style.display='flex';
@@ -374,15 +425,14 @@ function openChannel(id){
     })
 }
 function backToChannels(){ document.getElementById('channelChatPage').style.display='none'; document.getElementById('page-chaines').classList.add('active'); currentChannel=null; }
-function loadChannelMsgs(id){ fetch('/get_channel_msgs/'+id).then(r=>r.json()).then(msgs=>{ let box = document.getElementById('channelMsgBox'); box.innerHTML=''; msgs.forEach(m=>{ let d=document.createElement('div'); d.className='msg '+(m.from==MY_CODE?'me':'you'); let content = m.type=='text'? m.msg : `<a href="${m.msg}" target="_blank">📎 Fichier</a>`; d.innerHTML=`<b>${m.from_nom}</b><br>${content}<div class="time">${m.time}</div>`; box.append(d); }); box.scrollTop = box.scrollHeight; }) }
+function loadChannelMsgs(id){ fetch('/get_channel_msgs/'+id).then(r=>r.json()).then(msgs=>{ let box = document.getElementById('channelMsgBox'); box.innerHTML=''; msgs.forEach(m=>{ let d=document.createElement('div'); d.className='msg '+(m.from==MY_CODE?'me':'you'); let content = m.type=='text'? m.msg : m.type=='image'? `<img src="${m.msg}" style="max-width:200px; border-radius:8px;">` : m.type=='video'? `<video src="${m.msg}" controls style="max-width:200px; border-radius:8px;"></video>` : `<a href="${m.msg}" target="_blank">📎 Fichier</a>`; d.innerHTML=`<b>${m.from_nom}</b><br>${content}<div class="time">${m.time}</div>`; box.append(d); }); box.scrollTop = box.scrollHeight; }) }
 function sendChannelMsg(){ const msg = document.getElementById('channelMessage').value; if(!msg ||!currentChannel) return; fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg, type:'text'})}).then(()=>{document.getElementById('channelMessage').value=''; loadChannelMsgs(currentChannel);}) }
-document.getElementById('channelFileInput').onchange = e => { const file=e.target.files[0]; if(!file||!currentChannel) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg:ev.target.result, type:'file'})}).then(()=>loadChannelMsgs(currentChannel)); } reader.readAsDataURL(file); }
+document.getElementById('channelFileInput').onchange = e => { const file=e.target.files[0]; if(!file||!currentChannel) return; const reader=new FileReader(); reader.onload=ev=>{ let type = file.type.startsWith('video')? 'video' : 'image'; fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg:ev.target.result, type:type})}).then(()=>loadChannelMsgs(currentChannel)); } reader.readAsDataURL(file); }
 function changeChannelPhoto(){ document.getElementById('channelPhotoInput').click(); }
 document.getElementById('channelPhotoInput').onchange = e => { const file=e.target.files[0]; if(!file||!currentChannel) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/update_channel_photo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:currentChannel, photo:ev.target.result})}).then(()=>openChannel(currentChannel)); } reader.readAsDataURL(file); }
 
 document.querySelectorAll('.contact').forEach(el=>{ el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } }); });
 
-// AJOUT 9: SYNC ARRIERE PLAN POUR L'APP
 function sendToApp(data){ if(window.Android){ Android.saveMessage(JSON.stringify(data)); } }
 function syncMessages(){ {% for c in contacts %} fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{ localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs)); msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from})); }); {% endfor %} }
 syncMessages(); socket.on('new_message_alert', ()=>{ syncMessages(); });
@@ -406,7 +456,7 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <div><b>{{ ami.nom }}</b><br><small style="color:#8696A0;">{{ code_ami }}</small></div></div>
 <div class="messages" id="msgBox"></div>
 <form class="send-box" id="sendForm">
-<label class="file-btn">📎<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label> <!-- AJOUT BOUTON FICHIER -->
+<label class="file-btn">📎<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label>
 <input type="text" id="message" placeholder="Écris un message" class="input">
 <button id="micBtn" type="button" class="mic-btn">🎤</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
@@ -468,7 +518,6 @@ msgInput.value='';sendBtn.style.display='none';micBtn.style.display='block';}
 
 msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'block';}
 
-// AJOUT 3: ENVOI IMAGE/VIDEO DANS CHAT
 document.getElementById('chatFileInput').onchange = e => {
     const file=e.target.files[0]; if(!file) return;
     const reader=new FileReader();
@@ -645,7 +694,7 @@ def get_msg(ami):
     cle = "-".join(sorted([code, ami]))
     return jsonify(db["MESSAGES"].get(cle, []))
 
-# AJOUT 10: ROUTES CHAINES COMPLETES
+# ROUTES CHAINES
 @app.route('/create_channel', methods=['POST'])
 def create_channel():
     code, user, db = get_user()
@@ -698,7 +747,7 @@ def send_channel_msg():
     save_db(db)
     return jsonify({"status":"ok"})
 
-# AJOUT 11: ROUTES STATUT 24H + TOUS CONTACTS
+# ROUTES STATUT 24H
 @app.route('/get_all_status')
 def get_all_status():
     code, user, db = get_user()
@@ -747,5 +796,5 @@ def handle_send(data):
     emit('new_message_alert', {}, room=dest)
 
 if __name__=='__main__':
-    port = int(os.environ.get("PORT", 10000)) # MODIF POUR RENDER
+    port = int(os.environ.get("PORT", 10000))
     socketio.run(app,host='0.0.0.0',port=port)
