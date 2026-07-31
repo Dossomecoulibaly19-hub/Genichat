@@ -244,10 +244,10 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-actu" class="page"><div class="editor-video"><h3>ASTU</h3><p>En attente. Bientôt dispo.</p></div></div>
 
 <div class="bottom-nav">
-<div class="nav-item active" onclick="showPage(event, 'contacts')"><span>💬</span>Accueil</div>
-<div class="nav-item" onclick="showPage(event, 'statut')"><span>⭕</span>Statut</div>
-<div class="nav-item" onclick="showPage(event, 'chaines')"><span>📢</span>Chaînes</div>
-<div class="nav-item" onclick="showPage(event, 'actu')"><span>📰</span>Astu</div>
+<div class="nav-item active" onclick="showPage(this, 'contacts')"><span>💬</span>Accueil</div>
+<div class="nav-item" onclick="showPage(this, 'statut')"><span>⭕</span>Statut</div>
+<div class="nav-item" onclick="showPage(this, 'chaines')"><span>📢</span>Chaînes</div>
+<div class="nav-item" onclick="showPage(this, 'actu')"><span>📰</span>Astu</div>
 </div>
 
 <div class="crop-modal" id="videoEditorModal">
@@ -307,11 +307,12 @@ let mediaToPublish = null; let currentChannel = null; let editingChannelId = nul
 
 socket.emit('join',{code:MY_CODE});
 
-function showPage(event, page){
+// CORRECTION ICI: on utilise 'el' au lieu de 'event'
+function showPage(el, page){
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
     document.getElementById('page-'+page).classList.add('active');
-    event.currentTarget.classList.add('active');
+    el.classList.add('active');
     if(page=='chaines'){ loadChannels(); }
     if(page=='statut'){ loadAllStatus(); }
 }
