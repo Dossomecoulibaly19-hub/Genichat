@@ -250,10 +250,10 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-actu" class="page"><div class="editor-video"><h3>ASTU</h3><p>En attente. Bientôt dispo.</p></div></div>
 
 <div class="bottom-nav">
-<div class="nav-item active" onclick="showPage(this, 'contacts')"><span>💬</span>Accueil</div>
-<div class="nav-item" onclick="showPage(this, 'statut')"><span>⭕</span>Statut</div>
-<div class="nav-item" onclick="showPage(this, 'chaines')"><span>📢</span>Chaînes</div>
-<div class="nav-item" onclick="showPage(this, 'actu')"><span>📰</span>Astu</div>
+<div class="nav-item active" data-page="contacts"><span>💬</span>Accueil</div>
+<div class="nav-item" data-page="statut"><span>⭕</span>Statut</div>
+<div class="nav-item" data-page="chaines"><span>📢</span>Chaînes</div>
+<div class="nav-item" data-page="actu"><span>📰</span>Astu</div>
 </div>
 
 <div class="crop-modal" id="videoEditorModal">
@@ -313,14 +313,18 @@ let mediaToPublish = null; let currentChannel = null; let editingChannelId = nul
 
 socket.emit('join',{code:MY_CODE});
 
-function showPage(el, page){
-    document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
-    document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
-    document.getElementById('page-'+page).classList.add('active');
-    el.classList.add('active');
-    if(page=='chaines'){ loadChannels(); }
-    if(page=='statut'){ loadAllStatus(); }
-}
+// CORRECTION FINALE POUR ANDROID
+document.querySelectorAll('.nav-item').forEach(item=>{
+    item.addEventListener('click', function(){
+        const page = this.getAttribute('data-page');
+        document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+        document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
+        document.getElementById('page-'+page).classList.add('active');
+        this.classList.add('active');
+        if(page=='chaines'){ loadChannels(); }
+        if(page=='statut'){ loadAllStatus(); }
+    });
+});
 
 document.getElementById('statusFile').onchange = e => {
     const file = e.target.files[0]; if(!file) return;
@@ -817,4 +821,3 @@ def handle_send(data):
 
 if __name__=='__main__':
     port = int(os.environ.get("PORT", 10000))
-    socketio.run(app,host='0.0.0.0',port=port)
