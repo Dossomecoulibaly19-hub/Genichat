@@ -24,10 +24,13 @@ def load_db():
 
 def save_db(db):
     def _save():
-        with db_lock:
-            tmp = DB_FILE + ".tmp"
-            with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':'))
-            os.replace(tmp, DB_FILE)
+        try:
+            with db_lock:
+                tmp = DB_FILE + ".tmp"
+                with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':'))
+                os.replace(tmp, DB_FILE)
+        except Exception as e:
+            print("Erreur save:", e)
     threading.Thread(target=_save, daemon=True).start()
 
 def gen_code_port():
@@ -108,6 +111,9 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .file-input-btn{display:inline-block; padding:10px; background:#2A3942; border-radius:10px; cursor:pointer; margin:5px;}
 """
 
+def avatar_letter(nom):
+    return nom[0].upper() if nom else "?"
+
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GenieChat</title><style>{{ CSS }}</style></head><body>
 <div class="box"><h2>👋 GenieChat</h2>
@@ -128,7 +134,7 @@ REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <title>Créer Compte</title><style>{{ CSS }}</style></head><body>
 <div class="box"><h2>Créer ton Compte</h2>
 <form method="POST" action="/register" enctype="multipart/form-data">
-<div id="preview" class="avatar-big">{{ '' }}</div>
+<div id="preview" class="avatar-big"></div>
 <label for="photo" class="btn btn-gray">📷 Choisir Photo Profil</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
 <input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
 <div class="form-group"><label>Nom d'utilisateur</label><input name="nom" class="input" placeholder="Ton nom" required></div>
@@ -176,7 +182,7 @@ SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="box">
 <label>TON CODE:</label><div class="code-info" onclick="navigator.clipboard.writeText('{{ code }}')"> {{ code }} </div><small style="color:#8696A0;">Clique pour copier</small>
 <form method="POST" action="/update_profile" enctype="multipart/form-data">
-<div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div>
+<div id="preview" class="avatar-big" style="background-image:url('{{ photo }}')">{{ initial }}</div>
 <label for="photo" class="btn btn-gray">📷 Changer Photo</label><input type="file" id="photo" name="photo" accept="image/*" style="display:none;">
 <input type="hidden" id="crop_x" name="crop_x"><input type="hidden" id="crop_y" name="crop_y"><input type="hidden" id="crop_scale" name="crop_scale"><input type="hidden" id="original_img" name="original_img">
 <div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
@@ -203,7 +209,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <h2>GenieChat</h2>
 <div class="header-actions">
 <a href="/archives" style="color:white; text-decoration:none;">📦</a>
-<a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ '' if photo else nom[0]|upper }}</div></a>
+<a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ initial }}</div></a>
 </div>
 </div>
 
@@ -219,7 +225,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div id="page-contacts" class="page active">
 <div class="contact-list" id="contact-list">{% for c in contacts %}
 <div class="contact" data-code="{{ c }}" onmousedown="startLongPress('{{ c }}')" onmouseup="endLongPress()" onmouseleave="endLongPress()" ontouchstart="startLongPress('{{ c }}')" ontouchend="endLongPress()">
-<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ '' if users[c].photo else users[c].nom[0]|upper }}</div>
+<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
 <div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 {% if unread.get(c, 0) > 0 %}<div class="badge">{{ unread[c] }}</div>{% endif %}
 </div>{% endfor %}</div>
@@ -307,7 +313,6 @@ let mediaToPublish = null; let currentChannel = null; let editingChannelId = nul
 
 socket.emit('join',{code:MY_CODE});
 
-// CORRECTION ICI: on utilise 'el' au lieu de 'event'
 function showPage(el, page){
     document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
     document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
@@ -348,7 +353,7 @@ function loadAllStatus(){
             let hasStatus = user.status.length > 0;
             let preview = hasStatus? user.status[0].data : '';
             html+=`<div class="status-contact ${hasStatus?'has-status':''}" onclick="viewStatus('${user.code}')">
-                <div class="avatar" style="background-image:url('${user.photo}')">${user.photo?'':user.nom[0]}</div>
+                <div class="avatar" style="background-image:url('${user.photo}')">${user.initial}</div>
                 <div class="contact-info"><b>${user.nom}</b><br><small>${hasStatus?'Statut actif':'Pas de statut'}</small></div>
                 ${hasStatus?`<div class="status-preview" style="background-image:url(${preview})"></div>`:''}
             </div>`
@@ -413,7 +418,7 @@ function openChannelSettings(){
 }
 function closeChannelSettings(){ document.getElementById('channelSettingsPopup').style.display='none'; }
 function saveChannelSettings(){
-        fetch('/update_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, name:document.getElementById('channelNameInput').value})}).then(()=>{closeChannelSettings(); loadChannels();})
+    fetch('/update_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, name:document.getElementById('channelNameInput').value})}).then(()=>{closeChannelSettings(); loadChannels();})
 }
 document.getElementById('channelPhotoFile').onchange = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/update_channel_photo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, photo:ev.target.result})}).then(()=>document.getElementById('channelPhotoPreview').style.backgroundImage=`url(${ev.target.result})`); } reader.readAsDataURL(file); }
 function changeChannelPhoto(){ document.getElementById('channelPhotoFile').click(); }
@@ -431,7 +436,7 @@ ARCHIVES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a><h2>Archives</h2><div></div></div>
 <div class="contact-list" id="contact-list">{% for c in archived %}
 <div class="contact" onclick="location='/chat/{{ c }}'">
-<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ '' if users[c].photo else users[c].nom[0]|upper }}</div>
+<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
 <div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 </div>{% endfor %}</div>
 </body></html>"""
@@ -439,7 +444,7 @@ ARCHIVES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Chat avec {{ ami.nom }}</title><style>{{ CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
 <div class="header"><a href="/contacts" style="color:white; font-size:24px;">←</a>
-<div class="avatar" style="background-image:url('{{ ami.photo }}')">{{ '' if ami.photo else ami.nom[0]|upper }}</div>
+<div class="avatar" style="background-image:url('{{ ami.photo }}')">{{ ami.initial }}</div>
 <div><b>{{ ami.nom }}</b><br><small style="color:#8696A0;">{{ code_ami }}</small></div></div>
 <div class="messages" id="msgBox"></div>
 <form class="send-box" id="sendForm">
@@ -595,7 +600,7 @@ def do_login():
 def settings():
     code, user, db = get_user()
     if not code: return redirect('/')
-    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code)
+    return render_template_string(SETTINGS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], code=code, initial=avatar_letter(user['nom']))
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
@@ -623,14 +628,22 @@ def contacts():
     user_unread = db["UNREAD"].get(code, {})
     archived = db["ARCHIVED"].get(code, [])
     active_contacts = [c for c in user['contacts'] if c not in archived]
-    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], users=db["USERS"], contacts=active_contacts, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+
+    users_data = {}
+    for c, u in db["USERS"].items():
+        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": avatar_letter(u['nom'])}
+
+    return render_template_string(CONTACTS_HTML, CSS=CSS, nom=user['nom'], photo=user['photo'], initial=avatar_letter(user['nom']), users=users_data, contacts=active_contacts, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/archives')
 def archives():
     code, user, db = get_user()
     if not code: return redirect('/')
     archived = db["ARCHIVED"].get(code, [])
-    return render_template_string(ARCHIVES_HTML, CSS=CSS, users=db["USERS"], archived=archived)
+    users_data = {}
+    for c, u in db["USERS"].items():
+        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": avatar_letter(u['nom'])}
+    return render_template_string(ARCHIVES_HTML, CSS=CSS, users=users_data, archived=archived)
 
 @app.route('/delete_contacts', methods=['POST'])
 def delete_contacts():
@@ -673,6 +686,7 @@ def chat(code_ami):
         db["UNREAD"][code][code_ami] = 0; save_db(db)
     ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
+    ami['initial'] = avatar_letter(ami['nom'])
     return render_template_string(CHAT_HTML, CSS=CSS, central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'])
 
 @app.route('/get_msg/<ami>')
@@ -765,6 +779,7 @@ def get_all_status():
                 "code": c,
                 "nom": db["USERS"][c]['nom'],
                 "photo": db["USERS"][c]['photo'],
+                "initial": avatar_letter(db["USERS"][c]['nom']),
                 "status": db["STATUS"].get(c, [])
             })
     return jsonify(result)
