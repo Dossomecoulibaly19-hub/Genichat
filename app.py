@@ -19,7 +19,9 @@ db_lock = threading.Lock()
 def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
-            with open(DB_FILE) as f: return json.load(f)
+            try:
+                with open(DB_FILE) as f: return json.load(f)
+            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}}
         return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "CHANNELS": {}, "STATUS": {}, "CHANNEL_MSGS": {}}
 
 def save_db(db):
@@ -147,7 +149,7 @@ REGISTER_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button>
 <button type="button" class="btn" onclick="saveCrop()">Valider</button></div></div>
 <script>
-let scale=1,posX=0,posY=0,isDragging=false;
+let scale=1,posX=0,posY=0,isDragging=false; let startX=0,startY=0;
 let cropImg = document.getElementById('cropImg'); let preview = document.getElementById('preview');
 document.getElementById('photo').onchange = function(e){
     const file=e.target.files[0]; if(!file) return;
@@ -188,19 +190,39 @@ SETTINGS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="form-group"><label>Nom d'utilisateur</label><input name="nom" value="{{ nom }}" class="input" required></div>
 <button class="btn">Enregistrer</button>
 </form></div>
+<div id="cropModal" class="crop-modal"><div class="crop-area"><img id="cropImg" class="crop-img"><div class="crop-circle"></div></div>
+<div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button>
+<button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button>
+<button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button>
+<button type="button" class="btn" onclick="saveCrop()">Valider</button></div></div>
 <script>
-let scale=1,posX=0,posY=0,isDragging=false;let cropImg = document.createElement('img');cropImg.id='cropImg';cropImg.className='crop-img';
-document.body.appendChild(document.createElement('div')).id='cropModal';document.getElementById('cropModal').className='crop-modal';
-document.getElementById('cropModal').innerHTML='<div class="crop-area"></div><div class="crop-buttons"><button type="button" class="btn btn-gray" onclick="zoom(-0.1)">-</button><button type="button" class="btn btn-gray" onclick="closeCrop()">Annuler</button><button type="button" class="btn btn-gray" onclick="zoom(0.1)">+</button><button type="button" class="btn" onclick="saveCrop()">Valider</button></div>';
-document.querySelector('.crop-area').appendChild(cropImg);document.querySelector('.crop-area').appendChild(document.createElement('div')).className='crop-circle';
-document.getElementById('photo').onchange = function(e){const file=e.target.files[0]; if(!file) return;const reader=new FileReader();reader.onload=function(ev){cropImg.src = ev.target.result;document.getElementById('original_img').value = ev.target.result;document.getElementById('cropModal').style.display='flex';scale=0.8; posX=0; posY=0; updateTransform();}reader.readAsDataURL(file);}
+let scale=1,posX=0,posY=0,isDragging=false; let startX=0,startY=0;
+let cropImg = document.getElementById('cropImg'); let preview = document.getElementById('preview');
+document.getElementById('photo').onchange = function(e){
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=function(ev){
+        cropImg.src = ev.target.result;
+        document.getElementById('original_img').value = ev.target.result;
+        document.getElementById('cropModal').style.display='flex';
+        scale=0.8; posX=0; posY=0; updateTransform();
+    }
+    reader.readAsDataURL(file);
+}
 function updateTransform(){cropImg.style.transform=`translate(-50%,-50%) translate(${posX}px,${posY}px) scale(${scale})`;}
 cropImg.addEventListener('pointerdown', e=>{ e.preventDefault(); isDragging=true; let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; startX = pos.x - posX; startY = pos.y - posY; })
 document.addEventListener('pointermove', e=>{ if(!isDragging) return; e.preventDefault(); let pos = {x:e.touches?e.touches[0].clientX:e.clientX, y:e.touches?e.touches[0].clientY:e.clientY}; posX = pos.x - startX; posY = pos.y - startY; updateTransform(); })
 document.addEventListener('pointerup', ()=>{ isDragging=false; })
 function zoom(v){scale+=v; if(scale<0.3)scale=0.3; if(scale>3)scale=3; updateTransform();}
 function closeCrop(){document.getElementById('cropModal').style.display='none';}
-function saveCrop(){document.getElementById('crop_x').value=posX;document.getElementById('crop_y').value=posY;document.getElementById('crop_scale').value=scale;document.getElementById('preview').style.backgroundImage = `url(${cropImg.src})`;document.getElementById('preview').innerHTML = '';closeCrop();}
+function saveCrop(){
+    document.getElementById('crop_x').value=posX;
+    document.getElementById('crop_y').value=posY;
+    document.getElementById('crop_scale').value=scale;
+    preview.style.backgroundImage = `url(${cropImg.src})`;
+    preview.innerHTML = '';
+    closeCrop();
+}
 </script></body></html>"""
 
 CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
@@ -313,13 +335,13 @@ let mediaToPublish = null; let currentChannel = null; let editingChannelId = nul
 
 socket.emit('join',{code:MY_CODE});
 
-// CORRECTION FINALE POUR ANDROID
 document.querySelectorAll('.nav-item').forEach(item=>{
     item.addEventListener('click', function(){
         const page = this.getAttribute('data-page');
         document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
         document.querySelectorAll('.nav-item').forEach(p=>p.classList.remove('active'));
-        document.getElementById('page-'+page).classList.add('active');
+        const targetPage = document.getElementById('page-'+page);
+        if(targetPage){ targetPage.classList.add('active'); }
         this.classList.add('active');
         if(page=='chaines'){ loadChannels(); }
         if(page=='statut'){ loadAllStatus(); }
@@ -408,9 +430,12 @@ document.getElementById('channelMicBtn').onmousedown=document.getElementById('ch
     reader.onloadend=()=>{ fetch('/send_channel_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({channel:currentChannel, msg:reader.result, type:'audio'})}).then(()=>loadChannelMsgs(currentChannel)); }
     reader.readAsDataURL(audioBlob);
   }
-  chMediaRecorder.start();
+    chMediaRecorder.start();
 }
-document.getElementById('channelMicBtn').onmouseup=document.getElementById('channelMicBtn').ontouchend=()=>{ if(chMediaRecorder && chMediaRecorder.state!='inactive'){chMediaRecorder.stop();} document.getElementById('channelMicBtn').classList.remove('recording'); }
+document.getElementById('channelMicBtn').onmouseup=document.getElementById('channelMicBtn').ontouchend=()=>{
+  if(chMediaRecorder && chMediaRecorder.state!='inactive'){chMediaRecorder.stop();}
+  document.getElementById('channelMicBtn').classList.remove('recording');
+}
 
 function openChannelSettings(){
     fetch('/get_my_channel').then(r=>r.json()).then(ch=>{
@@ -424,14 +449,35 @@ function closeChannelSettings(){ document.getElementById('channelSettingsPopup')
 function saveChannelSettings(){
     fetch('/update_channel', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, name:document.getElementById('channelNameInput').value})}).then(()=>{closeChannelSettings(); loadChannels();})
 }
-document.getElementById('channelPhotoFile').onchange = e => { const file=e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=ev=>{ fetch('/update_channel_photo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, photo:ev.target.result})}).then(()=>document.getElementById('channelPhotoPreview').style.backgroundImage=`url(${ev.target.result})`); } reader.readAsDataURL(file); }
+document.getElementById('channelPhotoFile').onchange = e => {
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    fetch('/update_channel_photo', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:editingChannelId, photo:ev.target.result})})
+   .then(()=>document.getElementById('channelPhotoPreview').style.backgroundImage=`url(${ev.target.result})`);
+  }
+  reader.readAsDataURL(file);
+}
 function changeChannelPhoto(){ document.getElementById('channelPhotoFile').click(); }
 
-document.querySelectorAll('.contact').forEach(el=>{ el.addEventListener('click', ()=>{ if(!isSelecting){ location.href='/chat/'+el.dataset.code; } else { selectContact(el.dataset.code); } }); });
+document.querySelectorAll('.contact').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    if(!isSelecting){ location.href='/chat/'+el.dataset.code; }
+    else { selectContact(el.dataset.code); }
+  });
+});
 
 function sendToApp(data){ if(window.Android){ Android.saveMessage(JSON.stringify(data)); } }
-function syncMessages(){ {% for c in contacts %} fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{ localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs)); msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from})); }); {% endfor %} }
-syncMessages(); socket.on('new_message_alert', ()=>{ syncMessages(); });
+function syncMessages(){
+  {% for c in contacts %}
+  fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{
+    localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs));
+    msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from}));
+  });
+  {% endfor %}
+}
+syncMessages();
+socket.on('new_message_alert', ()=>{ syncMessages(); });
 </script>
 </body></html>"""
 
@@ -454,7 +500,7 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <form class="send-box" id="sendForm">
 <label class="file-btn">📎<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label>
 <input type="text" id="message" placeholder="Écris un message" class="input">
-<button id="micBtn" type="button" class="mic-btn">🎤</button>
+<button id="micBtn" type="button" class="mic-btn">🎙</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
 <script>
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const AMI_CODE="{{ code_ami }}";
