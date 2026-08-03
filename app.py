@@ -21,8 +21,8 @@ def load_db():
         if os.path.exists(DB_FILE):
             try:
                 with open(DB_FILE) as f: return json.load(f)
-            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}}
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}}
+            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
+        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
 
 def save_db(db):
     def _save():
@@ -39,7 +39,7 @@ def gen_code_port():
     db = load_db()
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if code not in db["USERS"]:
+        if code not in db["USERS"] and code not in db["GROUPS"]:
             return code
 
 def get_theme_css(theme):
@@ -67,11 +67,11 @@ CSS_BASE = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Sego
 .contact-info{flex:1;}
 .add-bar{padding:10px; display:flex; gap:10px; position:sticky; bottom:0;}
 .messages{padding:15px; flex:1; overflow-y:auto; display:flex; flex-direction:column; background-size:cover; background-position:center;}
-.msg{padding:9px 13px; border-radius:8px; margin:5px 0; max-width:78%; font-size:15px;}
+.msg{padding:9px 13px; border-radius:8px; margin:5px 0; max-width:78%; font-size:15px; position:relative;}
 .msg.me{background:#005C4B; align-self:flex-end; border-bottom-right-radius:2px; color:white;}
 .msg.you{background:#202C33; align-self:flex-start; border-bottom-left-radius:2px;}
 .time{font-size:11px; color:#8696A0; text-align:right; margin-top:4px;}
-.send-box{display:flex; padding:10px; gap:10px; align-items:center; position:sticky; bottom:0; z-index:5;} /* FIX BARRE EN BAS */
+.send-box{display:flex; padding:10px; gap:10px; align-items:center; position:sticky; bottom:0; z-index:5;}
 .check.gray{color:#8696A0;}.check.blue{color:#53BDEB;}
 .alert{background:#00A884; padding:12px; border-radius:10px; margin-bottom:15px; text-align:center; font-weight:600;}
 .crop-modal {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:99; flex-direction:column; justify-content:center; align-items:center;}
@@ -86,16 +86,23 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,0,0,0.7)} 70%{box-shadow:0 0 0 10px rgba(255,0,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,0,0,0)}}
 .audio-player{width:200px; height:40px; max-width:100%;}
 .badge{background:#00A884; color:white; border-radius:50%; min-width:22px; height:22px; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:bold; padding:2px 6px;}
-.popup {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0.8); z-index:100; justify-content:center; align-items:center;}
+.popup {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; justify-content:center; align-items:center;}
 .popup-box {background:#202C33; padding:25px; border-radius:15px; width:90%; max-width:350px; text-align:center;}
 .popup-buttons {display:flex; gap:10px; margin-top:20px;}
+.media-viewer {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:101; justify-content:center; align-items:center; flex-direction:column;}
+.media-viewer img,.media-viewer video {max-width:100%; max-height:80%;}
+.media-actions {position:absolute; bottom:20px; display:flex; gap:15px;}
+.context-menu {display:none; position:absolute; background:#2A3942; border-radius:8px; padding:5px 0; z-index:50; min-width:180px;}
+.context-menu button {width:100%; padding:12px 15px; background:none; border:none; color:white; text-align:left; cursor:pointer;}
+.context-menu button:hover {background:#344854;}
+.chat-img {max-width:200px; border-radius:8px; cursor:pointer;}
 """
 
 def avatar_letter(nom):
     return nom[0].upper() if nom else "?"
 
 def get_user_settings(code, db):
-    if code not in db["SETTINGS"]: db["SETTINGS"][code] = {"theme": "noir", "chat_bg": ""}
+    if code not in db["SETTINGS"]: db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
     return db["SETTINGS"][code]
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -232,6 +239,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <h2>GenieChat</h2>
 <div class="header-actions">
 <a href="/archives" style="color:inherit; text-decoration:none;">📦</a>
+<a href="#" onclick="openCreateGroup()" style="color:inherit; text-decoration:none; font-size:20px;">👥</a>
 <a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ initial }}</div></a>
 </div>
 </div>
@@ -246,7 +254,14 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>
 
 <div id="page-contacts" class="page active" style="flex:1; display:flex; flex-direction:column;">
-<div class="contact-list" id="contact-list">{% for c in contacts %}
+<div class="contact-list" id="contact-list">
+{% for g in groups %}
+<div class="contact" onclick="location='/group/{{ g.id }}'">
+<div class="avatar" style="background-image:url('{{ g.photo }}')">👥</div>
+<div class="contact-info"><b>{{ g.name }}</b><br><small style="color:#8696A0;">Groupe: {{ g.members|length }} membres</small></div>
+</div>
+{% endfor %}
+{% for c in contacts %}
 <div class="contact" data-code="{{ c }}" onmousedown="startLongPress('{{ c }}')" onmouseup="endLongPress()" onmouseleave="endLongPress()" ontouchstart="startLongPress('{{ c }}')" ontouchend="endLongPress()">
 <div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
 <div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
@@ -254,6 +269,18 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>{% endfor %}</div>
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;">
 <input name="code_ami" placeholder="Entrer CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
+</div>
+
+<div class="popup" id="groupPopup">
+<div class="popup-box">
+<h3>Créer un Groupe</h3>
+<input id="groupName" class="input" placeholder="Nom du groupe">
+<p style="color:#8696A0; font-size:12px;">Sélectionne les contacts puis valide</p>
+<div class="popup-buttons">
+<button class="btn btn-gray" onclick="closeGroupPopup()">Annuler</button>
+<button class="btn" onclick="createGroup()">Créer</button>
+</div>
+</div>
 </div>
 
 <div class="popup" id="deletePopup">
@@ -269,15 +296,24 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
-let selectedContacts = []; let longPressTimer; let isSelecting = false;
+let selectedContacts = []; let longPressTimer; let isSelecting = false; let groupMode = false;
 
 socket.emit('join',{code:MY_CODE});
 
-function startLongPress(code){ longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
+function openCreateGroup(){ groupMode=true; alert("Sélectionne les membres du groupe"); }
+function closeGroupPopup(){ document.getElementById('groupPopup').style.display='none'; }
+function createGroup(){
+    let name = document.getElementById('groupName').value;
+    if(!name || selectedContacts.length<2){ alert("Nom + 2 membres minimum"); return; }
+    fetch('/create_group', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, members:selectedContacts})})
+  .then(r=>r.json()).then(res=>{ if(res.status=='ok'){ location.href='/group/'+res.id } });
+}
+
+function startLongPress(code){ if(groupMode){ selectContact(code); return; } longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
 function endLongPress(){ clearTimeout(longPressTimer); }
 function enterSelectionMode(code){ isSelecting = true; selectContact(code); }
-function selectContact(code){ const el = document.querySelector(`[data-code="${code}"]`); if(!el) return; if(selectedContacts.includes(code)){ selectedContacts = selectedContacts.filter(c=>c!=code); el.classList.remove('selected'); } else { selectedContacts.push(code); el.classList.add('selected'); } updateSelectionHeader(); }
-function updateSelectionHeader(){ if(selectedContacts.length > 0){ document.getElementById('mainHeader').style.display='none'; document.getElementById('selectionHeader').style.display='flex'; document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné'; } }
+function selectContact(code){ const el = document.querySelector(`[data-code="${code}"]`); if(!el) return; if(selectedContacts.includes(code)){ selectedContacts = selectedContacts.filter(c=>c!=code); el.classList.remove('selected'); } else { selectedContacts.push(code); el.classList.add('selected'); } updateSelectionHeader(); if(groupMode && selectedContacts.length>=2){ document.getElementById('groupPopup').style.display='flex'; } }
+function updateSelectionHeader(){ if(selectedContacts.length > 0 &&!groupMode){ document.getElementById('mainHeader').style.display='none'; document.getElementById('selectionHeader').style.display='flex'; document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné'; } }
 function exitSelection(){ isSelecting = false; selectedContacts = []; document.querySelectorAll('.contact.selected').forEach(el=>el.classList.remove('selected')); document.getElementById('mainHeader').style.display='flex'; document.getElementById('selectionHeader').style.display='none'; }
 function confirmDelete(){ document.getElementById('deleteText').innerText = `Supprimer ${selectedContacts.length} contact(s)?`; document.getElementById('deletePopup').style.display='flex'; }
 function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
@@ -286,7 +322,7 @@ function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers:
 
 document.querySelectorAll('.contact').forEach(el=>{
   el.addEventListener('click', ()=>{
-    if(!isSelecting){ location.href='/chat/'+el.dataset.code; }
+    if(!isSelecting &&!groupMode){ location.href='/chat/'+el.dataset.code; }
     else { selectContact(el.dataset.code); }
   });
 });
@@ -326,44 +362,55 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <input type="text" id="message" placeholder="Écris un message" class="input">
 <button id="micBtn" type="button" class="mic-btn">🎤</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
+
+<div class="media-viewer" id="mediaViewer">
+<img id="viewerImg" style="display:none;"><video id="viewerVideo" controls style="display:none;"></video>
+<div class="media-actions">
+<a id="downloadBtn" class="btn" download>Télécharger</a>
+<button class="btn btn-gray" onclick="closeViewer()">Fermer</button>
+</div>
+</div>
+
+<div class="context-menu" id="contextMenu">
+<button onclick="deleteForMe()">Supprimer pour moi</button>
+<button onclick="deleteForAll()">Supprimer pour tout le monde</button>
+</div>
+
 <script>
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const AMI_CODE="{{ code_ami }}";
 const STORAGE_KEY = `chat_${MY_CODE}_${AMI_CODE}`;
-let mediaRecorder, audioChunks = [];
+let mediaRecorder, audioChunks = []; let selectedMsgId = null;
 const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
 const msgInput = document.getElementById('message');
 
 socket.on('connect',()=>socket.emit('join',{code:MY_CODE}));
 
-function sendToApp(data){
-  if(window.Android){
-    Android.saveMessage(JSON.stringify({
-      contact: AMI_CODE,
-      message: data.msg,
-      heure: data.time,
-      envoyeur: data.from
-    }));
-  }
+function openViewer(src, type){
+    document.getElementById('mediaViewer').style.display='flex';
+    document.getElementById('downloadBtn').href = src;
+    if(type=='image'){ document.getElementById('viewerImg').src=src; document.getElementById('viewerImg').style.display='block'; document.getElementById('viewerVideo').style.display='none'; }
+    else { document.getElementById('viewerVideo').src=src; document.getElementById('viewerVideo').style.display='block'; document.getElementById('viewerImg').style.display='none'; }
 }
+function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; }
+function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
+document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
+function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
+function deleteForAll(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'all'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
 
 function saveLocal(msgs){ localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)); }
 function loadLocal(){ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-
 function render(msgs){
   document.getElementById('msgBox').innerHTML='';
   msgs.forEach(m=>addMsg(m.from_nom,m.msg,m.from==MY_CODE,m.time,m.status,m.id,m.type));
   scroll();
 }
-
 function load(){
   let localMsgs = loadLocal();
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
     if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
-      saveLocal(serverMsgs);
-      serverMsgs.forEach(m => sendToApp(m));
-      render(serverMsgs);
+      saveLocal(serverMsgs); render(serverMsgs);
     }
   }).catch(()=>{});
 }
@@ -371,7 +418,6 @@ load();
 
 function sendData(data){
   let local = loadLocal(); local.push(data); saveLocal(local);
-  sendToApp(data);
   addMsg(data.from_nom,data.msg,true,data.time,data.status,data.id,data.type); scroll();
   socket.emit('send_message',data);
 }
@@ -419,19 +465,138 @@ micBtn.onmouseup=micBtn.ontouchend=()=>{
 }
 
 function addMsg(from,msg,me,time,status,id,type='text'){
-  let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you');
+  let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
   let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
-  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? `<a href="${msg}" target="_blank" style="color:inherit;">📎 Fichier / Image</a>` : msg;
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-img" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank" style="color:inherit;">📎 Fichier</a>`) : msg;
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
 socket.on('receive_message',d=>{
     if(d.from==AMI_CODE){
       let local = loadLocal(); local.push(d); saveLocal(local);
-      sendToApp(d);
       addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
     }
 });
+</script></body></html>"""
+
+GROUP_CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Groupe: {{ group.name }}</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
+<div class="header"><a href="/contacts" style="color:inherit; font-size:24px;">←</a>
+<div class="avatar" style="background-image:url('{{ group.photo }}')">👥</div>
+<div><b>{{ group.name }}</b><br><small style="color:#8696A0;">{{ group.members|length }} membres</small></div>
+<button onclick="changeGroupBg()" style="background:none; border:none; color:inherit; font-size:20px;">🖼️</button></div>
+<div class="messages" id="msgBox" style="background-image:url('{{ group_bg }}')"></div>
+<form class="send-box" id="sendForm">
+<label class="file-btn">📎<input type="file" id="groupFileInput" accept="image/*,video/*" style="display:none;"></label>
+<input type="text" id="message" placeholder="Message du groupe" class="input">
+<button id="micBtn" type="button" class="mic-btn">🎤</button>
+<button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
+
+<div class="media-viewer" id="mediaViewer">
+<img id="viewerImg" style="display:none;"><video id="viewerVideo" controls style="display:none;"></video>
+<div class="media-actions">
+<a id="downloadBtn" class="btn" download>Télécharger</a>
+<button class="btn btn-gray" onclick="closeViewer()">Fermer</button>
+</div>
+</div>
+
+<div class="context-menu" id="contextMenu">
+<button onclick="deleteForMe()">Supprimer pour moi</button>
+<button onclick="deleteForAll()">Supprimer pour tout le monde</button>
+</div>
+
+<script>
+const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const GROUP_ID="{{ group.id }}";
+let selectedMsgId = null; let mediaRecorder, audioChunks = []; let isRecording = false;
+
+socket.on('connect',()=>socket.emit('join',{code:GROUP_ID}));
+
+function openViewer(src, type){
+    document.getElementById('mediaViewer').style.display='flex';
+    document.getElementById('downloadBtn').href = src;
+    if(type=='image'){ document.getElementById('viewerImg').src=src; document.getElementById('viewerImg').style.display='block'; document.getElementById('viewerVideo').style.display='none'; }
+    else { document.getElementById('viewerVideo').src=src; document.getElementById('viewerVideo').style.display='block'; document.getElementById('viewerImg').style.display='none'; }
+}
+function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; }
+function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
+document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
+function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
+function deleteForAll(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'all'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
+
+function loadGroup(){
+  fetch('/get_group_msgs/'+GROUP_ID).then(r=>r.json()).then(msgs=>{
+    document.getElementById('msgBox').innerHTML='';
+    msgs.forEach(m=>addMsg(m.from_nom,m.msg,m.from==MY_CODE,m.time,m.id,m.type));
+    scroll();
+  });
+}
+loadGroup();
+
+function sendData(data){
+  addMsg(data.from_nom,data.msg,true,data.time,data.id,data.type); scroll();
+  socket.emit('send_group_message',data);
+}
+
+sendBtn.onclick=e=>{e.preventDefault();const msg=msgInput.value;if(!msg)return;
+let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+let data={group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:msg,time:t,id:id,type:'text'};
+sendData(data); msgInput.value='';sendBtn.style.display='none';micBtn.style.display='block';}
+
+msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'block';}
+
+document.getElementById('groupFileInput').onchange = e => {
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>{
+        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:ev.target.result,time:t,id:'m'+Date.now(),type:'file'});
+    }
+    reader.readAsDataURL(file);
+}
+
+micBtn.onclick=async()=>{
+  if(!isRecording){
+    isRecording=true; micBtn.classList.add('recording');
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRecorder = new MediaRecorder(stream);
+    audioChunks = [];
+    mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
+    mediaRecorder.onstop=()=>{
+      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+      const reader = new FileReader();
+      reader.onloadend=()=>{
+        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+        sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:reader.result,time:t,id:id,type:'audio'});
+      }
+      reader.readAsDataURL(audioBlob);
+    }
+    mediaRecorder.start();
+  } else {
+    isRecording=false; micBtn.classList.remove('recording');
+    if(mediaRecorder){ mediaRecorder.stop(); }
+  }
+}
+
+function addMsg(from,msg,me,time,id,type='text'){
+  let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-img" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank">📎 Fichier</a>`) : msg;
+  d.innerHTML=`<b>${from}</b><br>${content}<div class="time">${time}</div>`;document.getElementById('msgBox').append(d);
+}
+function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
+socket.on('receive_group_message',d=>{ if(d.group==GROUP_ID){ addMsg(d.from_nom,d.msg,false,d.time,d.id,d.type);scroll(); } });
+
+function changeGroupBg(){
+    let input = document.createElement('input'); input.type='file'; input.accept='image/*';
+    input.onchange = e => {
+        const file = e.target.files[0]; const reader = new FileReader();
+        reader.onload = ev => {
+            fetch('/update_group_bg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({group:GROUP_ID, bg:ev.target.result})})
+         .then(()=>location.reload());
+        }
+        reader.readAsDataURL(file);
+    }
+    input.click();
+}
 </script></body></html>"""
 
 def get_user():
@@ -463,7 +628,7 @@ def register():
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
         except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
-    db["SETTINGS"][code] = {"theme": "noir", "chat_bg": ""}
+    db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
     save_db(db); session['code'] = code; return redirect('/')
 
@@ -490,7 +655,7 @@ def update_profile():
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
             img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
-            size=200;             cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
+            size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
             user['photo'] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
@@ -513,7 +678,7 @@ def update_chat_bg():
         file = request.files['chat_bg']
         if file.filename!= '':
             img = Image.open(file.stream)
-            img = img.resize((1080, 1920)) # resize pour pas que ça pèse trop
+            img = img.resize((1080, 1920))
             buf = BytesIO(); img.save(buf, format="JPEG", quality=70)
             bg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
             db["SETTINGS"][code]["chat_bg"] = bg
@@ -530,6 +695,7 @@ def contacts():
     user_unread = db["UNREAD"].get(code, {})
     archived = db["ARCHIVED"].get(code, [])
     active_contacts = [c for c in user['contacts'] if c not in archived]
+    user_groups = [g for g in db["GROUPS"].values() if code in g['members']]
 
     users_data = {}
     for c, u in db["USERS"].items():
@@ -537,7 +703,7 @@ def contacts():
         users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": initial}
 
     my_initial = '' if user['photo'] else avatar_letter(user['nom'])
-    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], initial=my_initial, users=users_data, contacts=active_contacts, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], initial=my_initial, users=users_data, contacts=active_contacts, groups=user_groups, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/archives')
 def archives():
@@ -604,6 +770,52 @@ def get_msg(ami):
     cle = "-".join(sorted([code, ami]))
     return jsonify(db["MESSAGES"].get(cle, []))
 
+@app.route('/create_group', methods=['POST'])
+def create_group():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    g_id = gen_code_port()
+    db["GROUPS"][g_id] = {"id": g_id, "name": data['name'], "owner": code, "members": [code]+data['members'], "photo": ""}
+    db["GROUP_MSGS"][g_id] = []
+    db["SETTINGS"][code]["group_bg"][g_id] = ""
+    save_db(db)
+    return jsonify({"status":"ok", "id": g_id})
+
+@app.route('/get_group_msgs/<g_id>')
+def get_group_msgs(g_id):
+    db = load_db()
+    return jsonify(db["GROUP_MSGS"].get(g_id, []))
+
+@app.route('/group/<g_id>')
+def group_chat(g_id):
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    group = db["GROUPS"].get(g_id)
+    if not group: return "Groupe introuvable", 404
+    group_bg = settings["group_bg"].get(g_id, "")
+    return render_template_string(GROUP_CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), group=group, my_code=code, my_nom=user['nom'], central=CENTRAL_SERVER, group_bg=group_bg)
+
+@app.route('/update_group_bg', methods=['POST'])
+def update_group_bg():
+    code, user, db = get_user()
+    data = request.json
+    db["SETTINGS"][code]["group_bg"][data['group']] = data['bg']
+    save_db(db); return jsonify({"status":"ok"})
+
+@app.route('/delete_msg', methods=['POST'])
+def delete_msg():
+    code, user, db = get_user()
+    data = request.json
+    if data['mode'] == 'all':
+        if data['type']=='pv':
+            cle = "-".join(sorted([code, data['ami']]))
+            db["MESSAGES"][cle] = [m for m in db["MESSAGES"].get(cle,[]) if m['id']!=data['id']]
+        else:
+            db["GROUP_MSGS"][data['group']] = [m for m in db["GROUP_MSGS"].get(data['group'],[]) if m['id']!=data['id']]
+    save_db(db); return jsonify({"status":"ok"})
+
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
 
@@ -624,6 +836,15 @@ def handle_send(data):
 
     emit('receive_message', data, room=dest)
     emit('new_message_alert', {}, room=dest)
+
+@socketio.on('send_group_message')
+def handle_group_send(data):
+    db = load_db()
+    g_id = data['group']
+    if g_id not in db["GROUP_MSGS"]: db["GROUP_MSGS"][g_id] = []
+    db["GROUP_MSGS"][g_id].append(data)
+    save_db(db)
+    emit('receive_group_message', data, room=g_id)
 
 if __name__=='__main__':
     port = int(os.environ.get("PORT", 10000))
