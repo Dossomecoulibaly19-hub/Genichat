@@ -20,10 +20,8 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             try:
-                with open(DB_FILE, 'r', encoding='utf-8') as f: 
-                    return json.load(f)
-            except Exception: 
-                pass
+                with open(DB_FILE) as f: return json.load(f)
+            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
         return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
 
 def save_db(db):
@@ -31,8 +29,7 @@ def save_db(db):
         try:
             with db_lock:
                 tmp = DB_FILE + ".tmp"
-                with open(tmp, "w", encoding='utf-8') as f: 
-                    json.dump(db, f, separators=(',', ':'))
+                with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':'))
                 os.replace(tmp, DB_FILE)
         except Exception as e:
             print("Erreur save:", e)
@@ -84,7 +81,7 @@ CSS_BASE = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Sego
 .crop-buttons {position:absolute; bottom:0; width:100%; padding:15px; background:#202C33; display:flex; gap:10px;}
 h2{text-align:center; margin-bottom:15px; color:#00A884;}
 label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
-.mic-btn,.file-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; touch-action:none;}
+.mic-btn,.file-btn{background:#00A884; border:none; border-radius:50%; width:48px; height:48px; font-size:22px; color:white; cursor:pointer; display:flex; align-items:center; justify-content:center;}
 .mic-btn.recording{background:red; animation: pulse 1s infinite;}
 @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,0,0,0.7)} 70%{box-shadow:0 0 0 10px rgba(255,0,0,0)} 100%{box-shadow:0 0 0 0 rgba(255,0,0,0)}}
 .audio-player{width:200px; height:40px; max-width:100%;}
@@ -92,23 +89,21 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .popup {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.8); z-index:100; justify-content:center; align-items:center;}
 .popup-box {background:#202C33; padding:25px; border-radius:15px; width:90%; max-width:350px; text-align:center;}
 .popup-buttons {display:flex; gap:10px; margin-top:20px;}
-.media-viewer {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:#000; z-index:101; justify-content:center; align-items:center; flex-direction:column;}
-.media-viewer img,.media-viewer video {max-width:100%; max-height:80%;}
-.media-actions {position:absolute; bottom:20px; display:flex; gap:15px;}
+.media-viewer {display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.95); z-index:101; justify-content:center; align-items:center; flex-direction:column; padding:20px;}
+.media-viewer img,.media-viewer video {max-width:100%; max-height:80vh; object-fit:contain; border-radius:8px;}
+.media-actions {position:absolute; bottom:30px; display:flex; gap:15px; z-index:102;}
 .context-menu {display:none; position:absolute; background:#2A3942; border-radius:8px; padding:5px 0; z-index:50; min-width:180px;}
 .context-menu button {width:100%; padding:12px 15px; background:none; border:none; color:white; text-align:left; cursor:pointer;}
 .context-menu button:hover {background:#344854;}
-.chat-img {max-width:200px; border-radius:8px; cursor:pointer;}
+.chat-img {max-width:220px; max-height:220px; object-fit:cover; border-radius:8px; cursor:pointer; margin-top:4px;}
+.chat-video {max-width:220px; max-height:220px; border-radius:8px; cursor:pointer; margin-top:4px;}
 """
 
 def avatar_letter(nom):
     return nom[0].upper() if nom else "?"
 
 def get_user_settings(code, db):
-    if "SETTINGS" not in db:
-        db["SETTINGS"] = {}
-    if code not in db["SETTINGS"]: 
-        db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
+    if code not in db["SETTINGS"]: db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
     return db["SETTINGS"][code]
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -269,8 +264,8 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 {% endfor %}
 {% for c in contacts %}
 <div class="contact" data-code="{{ c }}" onmousedown="startLongPress('{{ c }}')" onmouseup="endLongPress()" onmouseleave="endLongPress()" ontouchstart="startLongPress('{{ c }}')" ontouchend="endLongPress()">
-<div class="avatar" style="background-image:url('{{ users[c].photo if c in users else '' }}')">{{ users[c].initial if c in users else '?' }}</div>
-<div class="contact-info"><b>{{ users[c].nom if c in users else c }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
+<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
+<div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 {% if unread.get(c, 0) > 0 %}<div class="badge">{{ unread[c] }}</div>{% endif %}
 </div>{% endfor %}</div>
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;">
@@ -352,8 +347,8 @@ ARCHIVES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="header"><a href="/contacts" style="color:inherit; font-size:24px;">←</a><h2>Archives</h2><div></div></div>
 <div class="contact-list" id="contact-list">{% for c in archived %}
 <div class="contact" onclick="location='/chat/{{ c }}'">
-<div class="avatar" style="background-image:url('{{ users[c].photo if c in users else '' }}')">{{ users[c].initial if c in users else '?' }}</div>
-<div class="contact-info"><b>{{ users[c].nom if c in users else c }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
+<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
+<div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 </div>{% endfor %}</div>
 </body></html>"""
 
@@ -364,15 +359,15 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <div><b>{{ ami.nom }}</b><br><small style="color:#8696A0;">{{ code_ami }}</small></div></div>
 <div class="messages" id="msgBox" style="background-image:url('{{ chat_bg }}')"></div>
 <form class="send-box" id="sendForm">
-<label class="file-btn">📎<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label>
+<label class="file-btn" title="Envoyer image ou vidéo">🖼️<input type="file" id="chatFileInput" accept="image/*,video/*" style="display:none;"></label>
 <input type="text" id="message" placeholder="Écris un message" class="input">
-<button id="micBtn" type="button" class="mic-btn">🎤</button>
+<button id="micBtn" type="button" class="mic-btn" title="Enregistrer message vocal">🎤</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
 
 <div class="media-viewer" id="mediaViewer">
 <img id="viewerImg" style="display:none;"><video id="viewerVideo" controls style="display:none;"></video>
 <div class="media-actions">
-<a id="downloadBtn" class="btn" download>Télécharger</a>
+<a id="downloadBtn" class="btn" download="media_geniechat">💾 Enregistrer</a>
 <button class="btn btn-gray" onclick="closeViewer()">Fermer</button>
 </div>
 </div>
@@ -385,7 +380,7 @@ CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=d
 <script>
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const AMI_CODE="{{ code_ami }}";
 const STORAGE_KEY = `chat_${MY_CODE}_${AMI_CODE}`;
-let mediaRecorder, audioChunks = []; let selectedMsgId = null;
+let mediaRecorder, audioChunks = [], isRecording = false; let selectedMsgId = null;
 const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
 const msgInput = document.getElementById('message');
@@ -398,7 +393,7 @@ function openViewer(src, type){
     if(type=='image'){ document.getElementById('viewerImg').src=src; document.getElementById('viewerImg').style.display='block'; document.getElementById('viewerVideo').style.display='none'; }
     else { document.getElementById('viewerVideo').src=src; document.getElementById('viewerVideo').style.display='block'; document.getElementById('viewerImg').style.display='none'; }
 }
-function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; }
+function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; const v=document.getElementById('viewerVideo'); v.pause(); v.src=''; }
 function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
 document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
 function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
@@ -432,9 +427,9 @@ sendBtn.onclick=e=>{e.preventDefault();const msg=msgInput.value;if(!msg)return;
 let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
 let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:msg,time:t,id:id,type:'text',status:'sent'};
 sendData(data);
-msgInput.value='';sendBtn.style.display='none';micBtn.style.display='block';}
+msgInput.value='';sendBtn.style.display='none';micBtn.style.display='flex';}
 
-msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'block';}
+msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'flex';}
 
 document.getElementById('chatFileInput').onchange = e => {
     const file=e.target.files[0]; if(!file) return;
@@ -442,41 +437,49 @@ document.getElementById('chatFileInput').onchange = e => {
     reader.onload=ev=>{
         let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
         sendData({to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:ev.target.result,time:t,id:'m'+Date.now(),type:'file'});
+        e.target.value = '';
     }
     reader.readAsDataURL(file);
 }
 
-micBtn.onmousedown=micBtn.ontouchstart=async(e)=>{
-  e.preventDefault();
-  micBtn.classList.add('recording');
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-    mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
-    audioChunks = [];
-    mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-    mediaRecorder.onstop=()=>{
-      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
-      const reader = new FileReader();
-      reader.onloadend=()=>{
-        const base64Audio = reader.result;
-        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-        let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
-        sendData(data);
-      }
-      reader.readAsDataURL(audioBlob);
+micBtn.onclick = async () => {
+  if (!isRecording) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          let t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          let id = 'm' + Date.now();
+          let data = { to: AMI_CODE, from: MY_CODE, from_nom: "{{ my_nom }}", msg: reader.result, time: t, id: id, type: 'audio', status: 'sent' };
+          sendData(data);
+        };
+        reader.readAsDataURL(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      mediaRecorder.start();
+      isRecording = true;
+      micBtn.classList.add('recording');
+    } catch (err) {
+      alert("Impossible d'accéder au microphone.");
     }
-    mediaRecorder.start();
-  } catch(err){ console.error(err); }
-}
-micBtn.onmouseup=micBtn.ontouchend=()=>{
-  if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
-  micBtn.classList.remove('recording');
-}
+  } else {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+    micBtn.classList.remove('recording');
+  }
+};
 
 function addMsg(from,msg,me,time,status,id,type='text'){
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
   let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
-  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-img" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank" style="color:inherit;">📎 Fichier</a>`) : msg;
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-video" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank" style="color:inherit;">📎 Fichier</a>`) : msg;
   d.innerHTML=`${content}<div class="time">${time} ${check}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
@@ -496,15 +499,15 @@ GROUP_CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="w
 <button onclick="changeGroupBg()" style="background:none; border:none; color:inherit; font-size:20px;">🖼️</button></div>
 <div class="messages" id="msgBox" style="background-image:url('{{ group_bg }}')"></div>
 <form class="send-box" id="sendForm">
-<label class="file-btn">📎<input type="file" id="groupFileInput" accept="image/*,video/*" style="display:none;"></label>
+<label class="file-btn" title="Envoyer image ou vidéo">🖼️<input type="file" id="groupFileInput" accept="image/*,video/*" style="display:none;"></label>
 <input type="text" id="message" placeholder="Message du groupe" class="input">
-<button id="micBtn" type="button" class="mic-btn">🎤</button>
+<button id="micBtn" type="button" class="mic-btn" title="Enregistrer message vocal">🎤</button>
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px; display:none;">➤</button></form>
 
 <div class="media-viewer" id="mediaViewer">
 <img id="viewerImg" style="display:none;"><video id="viewerVideo" controls style="display:none;"></video>
 <div class="media-actions">
-<a id="downloadBtn" class="btn" download>Télécharger</a>
+<a id="downloadBtn" class="btn" download="media_geniechat">💾 Enregistrer</a>
 <button class="btn btn-gray" onclick="closeViewer()">Fermer</button>
 </div>
 </div>
@@ -529,7 +532,7 @@ function openViewer(src, type){
     if(type=='image'){ document.getElementById('viewerImg').src=src; document.getElementById('viewerImg').style.display='block'; document.getElementById('viewerVideo').style.display='none'; }
     else { document.getElementById('viewerVideo').src=src; document.getElementById('viewerVideo').style.display='block'; document.getElementById('viewerImg').style.display='none'; }
 }
-function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; }
+function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; const v=document.getElementById('viewerVideo'); v.pause(); v.src=''; }
 function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
 document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
 function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
@@ -552,9 +555,9 @@ function sendData(data){
 sendBtn.onclick=e=>{e.preventDefault();const msg=msgInput.value;if(!msg)return;
 let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
 let data={group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:msg,time:t,id:id,type:'text'};
-sendData(data); msgInput.value='';sendBtn.style.display='none';micBtn.style.display='block';}
+sendData(data); msgInput.value='';sendBtn.style.display='none';micBtn.style.display='flex';}
 
-msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'block';}
+msgInput.oninput=()=>{sendBtn.style.display=msgInput.value?'block':'none'; micBtn.style.display=msgInput.value?'none':'flex';}
 
 document.getElementById('groupFileInput').onchange = e => {
     const file=e.target.files[0]; if(!file) return;
@@ -562,38 +565,47 @@ document.getElementById('groupFileInput').onchange = e => {
     reader.onload=ev=>{
         let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
         sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:ev.target.result,time:t,id:'m'+Date.now(),type:'file'});
+        e.target.value = '';
     }
     reader.readAsDataURL(file);
 }
 
-micBtn.onclick=async()=>{
-  if(!isRecording){
-    isRecording=true; micBtn.classList.add('recording');
+micBtn.onclick = async () => {
+  if (!isRecording) {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorder = new MediaRecorder(stream);
       audioChunks = [];
-      mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-      mediaRecorder.onstop=()=>{
-        const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+      mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
         const reader = new FileReader();
-        reader.onloadend=()=>{
-          let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-          sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:reader.result,time:t,id:id,type:'audio'});
-        }
+        reader.onloadend = () => {
+          let t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          let id = 'm' + Date.now();
+          sendData({ group: GROUP_ID, from: MY_CODE, from_nom: "{{ my_nom }}", msg: reader.result, time: t, id: id, type: 'audio' });
+        };
         reader.readAsDataURL(audioBlob);
-      }
+        stream.getTracks().forEach(track => track.stop());
+      };
       mediaRecorder.start();
-    } catch(err) { console.error(err); isRecording=false; micBtn.classList.remove('recording'); }
+      isRecording = true;
+      micBtn.classList.add('recording');
+    } catch (err) {
+      alert("Impossible d'accéder au microphone.");
+    }
   } else {
-    isRecording=false; micBtn.classList.remove('recording');
-    if(mediaRecorder){ mediaRecorder.stop(); }
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+    }
+    isRecording = false;
+    micBtn.classList.remove('recording');
   }
-}
+};
 
 function addMsg(from,msg,me,time,id,type='text'){
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
-  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-img" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank">📎 Fichier</a>`) : msg;
+  let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-video" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank">📎 Fichier</a>`) : msg;
   d.innerHTML=`<b>${from}</b><br>${content}<div class="time">${time}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
@@ -635,45 +647,40 @@ def register():
     if request.form.get('original_img'):
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img_data = request.form['original_img'].split(',')[1]
-            img = Image.open(BytesIO(base64.b64decode(img_data)))
+            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
             size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        except Exception as e: 
-            print("Register crop error:", e)
+        except: pass
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
-    if "SETTINGS" not in db: db["SETTINGS"] = {}
     db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
-    if "ARCHIVED" not in db: db["ARCHIVED"] = {}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
     save_db(db); session['code'] = code; return redirect('/')
 
 @app.route('/login', methods=['POST'])
 def do_login():
-    db = load_db(); code = request.form['code'].upper().strip()
+    db = load_db(); code = request.form['code'].upper()
     if code in db["USERS"]: session['code'] = code; return redirect('/')
     return "Code introuvable", 404
 
 @app.route('/settings')
 def settings():
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
-    st = get_user_settings(code, db)
-    initial = '' if user.get('photo') else avatar_letter(user.get('nom', ''))
-    return render_template_string(SETTINGS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), nom=user['nom'], photo=user.get('photo',''), code=code, initial=initial, theme=st["theme"])
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    initial = '' if user['photo'] else avatar_letter(user['nom'])
+    return render_template_string(SETTINGS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], code=code, initial=initial, theme=settings["theme"])
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
+    if not code: return redirect('/')
     user['nom'] = request.form['nom']
-    if request.form.get('original_img') and request.form.get('original_img') != "":
+    if request.form.get('original_img') and request.form.get('original_img')!= "":
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img_data = request.form['original_img'].split(',')[1]
-            img = Image.open(BytesIO(base64.b64decode(img_data)))
+            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
             size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
@@ -686,7 +693,7 @@ def update_theme():
     code, user, db = get_user()
     if not code: return redirect('/')
     theme = request.form['theme']
-    get_user_settings(code, db)["theme"] = theme
+    db["SETTINGS"][code]["theme"] = theme
     save_db(db); return redirect('/settings')
 
 @app.route('/update_chat_bg', methods=['POST'])
@@ -695,12 +702,12 @@ def update_chat_bg():
     if not code: return redirect('/')
     if 'chat_bg' in request.files:
         file = request.files['chat_bg']
-        if file.filename != '':
+        if file.filename!= '':
             img = Image.open(file.stream)
             img = img.resize((1080, 1920))
             buf = BytesIO(); img.save(buf, format="JPEG", quality=70)
             bg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
-            get_user_settings(code, db)["chat_bg"] = bg
+            db["SETTINGS"][code]["chat_bg"] = bg
     save_db(db); return redirect('/settings')
 
 @app.route('/logout')
@@ -709,44 +716,42 @@ def logout(): session.pop('code', None); return redirect('/')
 @app.route('/contacts')
 def contacts():
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
-    st = get_user_settings(code, db)
-    user_unread = db.get("UNREAD", {}).get(code, {})
-    archived = db.get("ARCHIVED", {}).get(code, [])
-    active_contacts = [c for c in user.get('contacts', []) if c not in archived]
-    user_groups = [g for g in db.get("GROUPS", {}).values() if code in g.get('members', [])]
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    user_unread = db["UNREAD"].get(code, {})
+    archived = db["ARCHIVED"].get(code, [])
+    active_contacts = [c for c in user['contacts'] if c not in archived]
+    user_groups = [g for g in db["GROUPS"].values() if code in g['members']]
 
     users_data = {}
-    for c, u in db.get("USERS", {}).items():
-        initial = '' if u.get('photo') else avatar_letter(u.get('nom', ''))
-        users_data[c] = {"nom": u.get('nom', ''), "photo": u.get('photo', ''), "initial": initial}
+    for c, u in db["USERS"].items():
+        initial = '' if u['photo'] else avatar_letter(u['nom'])
+        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": initial}
 
-    my_initial = '' if user.get('photo') else avatar_letter(user.get('nom', ''))
-    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), nom=user['nom'], photo=user.get('photo',''), initial=my_initial, users=users_data, contacts=active_contacts, groups=user_groups, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+    my_initial = '' if user['photo'] else avatar_letter(user['nom'])
+    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], initial=my_initial, users=users_data, contacts=active_contacts, groups=user_groups, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/archives')
 def archives():
     code, user, db = get_user()
     if not code: return redirect('/')
-    st = get_user_settings(code, db)
-    archived = db.get("ARCHIVED", {}).get(code, [])
+    settings = get_user_settings(code, db)
+    archived = db["ARCHIVED"].get(code, [])
     users_data = {}
-    for c, u in db.get("USERS", {}).items():
-        initial = '' if u.get('photo') else avatar_letter(u.get('nom', ''))
-        users_data[c] = {"nom": u.get('nom', ''), "photo": u.get('photo', ''), "initial": initial}
-    return render_template_string(ARCHIVES_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), users=users_data, archived=archived)
+    for c, u in db["USERS"].items():
+        initial = '' if u['photo'] else avatar_letter(u['nom'])
+        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": initial}
+    return render_template_string(ARCHIVES_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), users=users_data, archived=archived)
 
 @app.route('/delete_contacts', methods=['POST'])
 def delete_contacts():
     code, user, db = get_user()
-    if not code or not user: return jsonify({"status":"error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    for c in data.get('contacts', []):
-        if c in user.get('contacts', []): 
-            user['contacts'].remove(c)
+    for c in data['contacts']:
+        if c in user['contacts']: user['contacts'].remove(c)
         cle = "-".join(sorted([code, c]))
-        if cle in db.get("MESSAGES", {}): 
-            del db["MESSAGES"][cle]
+        if cle in db["MESSAGES"]: del db["MESSAGES"][cle]
     db["USERS"][code] = user; save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/archive_contacts', methods=['POST'])
@@ -754,16 +759,15 @@ def archive_contacts():
     code, user, db = get_user()
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    if "ARCHIVED" not in db: db["ARCHIVED"] = {}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
-    for c in data.get('contacts', []):
+    for c in data['contacts']:
         if c not in db["ARCHIVED"][code]: db["ARCHIVED"][code].append(c)
     save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
+    if not code: return redirect('/')
     if request.method == 'GET': return redirect('/contacts')
     code_ami = request.form['code_ami'].upper().strip()
     if code_ami in db["USERS"]:
@@ -775,23 +779,22 @@ def ajouter():
 @app.route('/chat/<code_ami>')
 def chat(code_ami):
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
-    st = get_user_settings(code, db)
-    if code in db.get("UNREAD", {}) and code_ami in db["UNREAD"][code]:
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    if code in db["UNREAD"] and code_ami in db["UNREAD"][code]:
         db["UNREAD"][code][code_ami] = 0; save_db(db)
     ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
-    initial = '' if ami.get('photo') else avatar_letter(ami.get('nom', ''))
+    initial = '' if ami['photo'] else avatar_letter(ami['nom'])
     ami['initial'] = initial
-    chat_bg = st.get("chat_bg", "")
-    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
+    chat_bg = settings.get("chat_bg", "")
+    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
 
 @app.route('/get_msg/<ami>')
 def get_msg(ami):
     code, _, db = get_user()
-    if not code: return jsonify([])
     cle = "-".join(sorted([code, ami]))
-    return jsonify(db.get("MESSAGES", {}).get(cle, []))
+    return jsonify(db["MESSAGES"].get(cle, []))
 
 @app.route('/create_group', methods=['POST'])
 def create_group():
@@ -799,75 +802,58 @@ def create_group():
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
     g_id = gen_code_port()
-    if "GROUPS" not in db: db["GROUPS"] = {}
-    if "GROUP_MSGS" not in db: db["GROUP_MSGS"] = {}
-    
-    db["GROUPS"][g_id] = {"id": g_id, "name": data['name'], "owner": code, "members": [code]+data.get('members', []), "photo": ""}
+    db["GROUPS"][g_id] = {"id": g_id, "name": data['name'], "owner": code, "members": [code]+data['members'], "photo": ""}
     db["GROUP_MSGS"][g_id] = []
-    
-    st = get_user_settings(code, db)
-    if "group_bg" not in st: st["group_bg"] = {}
-    st["group_bg"][g_id] = ""
+    db["SETTINGS"][code]["group_bg"][g_id] = ""
     save_db(db)
     return jsonify({"status":"ok", "id": g_id})
 
 @app.route('/get_group_msgs/<g_id>')
 def get_group_msgs(g_id):
     db = load_db()
-    return jsonify(db.get("GROUP_MSGS", {}).get(g_id, []))
+    return jsonify(db["GROUP_MSGS"].get(g_id, []))
 
 @app.route('/group/<g_id>')
 def group_chat(g_id):
     code, user, db = get_user()
-    if not code or not user: return redirect('/')
-    st = get_user_settings(code, db)
-    group = db.get("GROUPS", {}).get(g_id)
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    group = db["GROUPS"].get(g_id)
     if not group: return "Groupe introuvable", 404
-    group_bg = st.get("group_bg", {}).get(g_id, "")
-    return render_template_string(GROUP_CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), group=group, my_code=code, my_nom=user['nom'], central=CENTRAL_SERVER, group_bg=group_bg)
+    group_bg = settings["group_bg"].get(g_id, "")
+    return render_template_string(GROUP_CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), group=group, my_code=code, my_nom=user['nom'], central=CENTRAL_SERVER, group_bg=group_bg)
 
 @app.route('/update_group_bg', methods=['POST'])
 def update_group_bg():
     code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    st = get_user_settings(code, db)
-    if "group_bg" not in st: st["group_bg"] = {}
-    st["group_bg"][data['group']] = data['bg']
+    db["SETTINGS"][code]["group_bg"][data['group']] = data['bg']
     save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/delete_msg', methods=['POST'])
 def delete_msg():
     code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    if data.get('mode') == 'all':
-        if data.get('type') == 'pv':
+    if data['mode'] == 'all':
+        if data['type']=='pv':
             cle = "-".join(sorted([code, data['ami']]))
-            if cle in db.get("MESSAGES", {}):
-                db["MESSAGES"][cle] = [m for m in db["MESSAGES"][cle] if m.get('id') != data.get('id')]
+            db["MESSAGES"][cle] = [m for m in db["MESSAGES"].get(cle,[]) if m['id']!=data['id']]
         else:
-            g_id = data.get('group')
-            if g_id in db.get("GROUP_MSGS", {}):
-                db["GROUP_MSGS"][g_id] = [m for m in db["GROUP_MSGS"][g_id] if m.get('id') != data.get('id')]
+            db["GROUP_MSGS"][data['group']] = [m for m in db["GROUP_MSGS"].get(data['group'],[]) if m['id']!=data['id']]
     save_db(db); return jsonify({"status":"ok"})
 
 @socketio.on('join')
-def on_join(data): 
-    if isinstance(data, dict) and 'code' in data:
-        join_room(data['code'])
+def on_join(data): join_room(data['code'])
 
 @socketio.on('send_message')
 def handle_send(data):
     db = load_db()
     cle = "-".join(sorted([data['to'], data['from']]))
-    if "MESSAGES" not in db: db["MESSAGES"] = {}
     if cle not in db["MESSAGES"]: db["MESSAGES"][cle] = []
     db["MESSAGES"][cle].append(data)
 
     dest = data['to']
     src = data['from']
-    if "UNREAD" not in db: db["UNREAD"] = {}
     if dest not in db["UNREAD"]: db["UNREAD"][dest] = {}
     if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
     db["UNREAD"][dest][src] += 1
@@ -881,7 +867,6 @@ def handle_send(data):
 def handle_group_send(data):
     db = load_db()
     g_id = data['group']
-    if "GROUP_MSGS" not in db: db["GROUP_MSGS"] = {}
     if g_id not in db["GROUP_MSGS"]: db["GROUP_MSGS"][g_id] = []
     db["GROUP_MSGS"][g_id].append(data)
     save_db(db)
@@ -889,4 +874,4 @@ def handle_group_send(data):
 
 if __name__=='__main__':
     port = int(os.environ.get("PORT", 10000))
-    socketio.run(app, host='0.0.0.0', port=port)
+    socketio.run(app,host='0.0.0.0',port=port)
