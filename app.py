@@ -3,14 +3,14 @@ eventlet.monkey_patch()
 
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
 from flask_socketio import SocketIO, emit, join_room, leave_room
-import json, os, base64, time, random, string, threading
+import json, os, base64, time, random, string, threading, copy
 from datetime import datetime, timedelta
 from io import BytesIO
 from PIL import Image
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', ping_timeout=60, ping_interval=25)
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
@@ -20,16 +20,20 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             try:
-                with open(DB_FILE) as f: return json.load(f)
-            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
+                with open(DB_FILE, 'r', encoding='utf-8') as f: 
+                    return json.load(f)
+            except: 
+                return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
         return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
 
 def save_db(db):
+    db_to_save = copy.deepcopy(db)
     def _save():
         try:
             with db_lock:
                 tmp = DB_FILE + ".tmp"
-                with open(tmp, "w") as f: json.dump(db, f, separators=(',', ':'))
+                with open(tmp, "w", encoding='utf-8') as f: 
+                    json.dump(db_to_save, f, separators=(',', ':'), ensure_ascii=False)
                 os.replace(tmp, DB_FILE)
         except Exception as e:
             print("Erreur save:", e)
@@ -111,13 +115,21 @@ LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
-<a href="/logout" class="btn btn-gray">Changer de Compte</a>
+<a href="/logout" class="btn btn-gray" onclick="localStorage.clear();">Changer de Compte</a>
+<script>localStorage.setItem('genie_user_code', '{{ code }}');</script>
 {% else %}
-<form method="POST" action="/login">
-<div class="form-group"><label>Code Unique</label><input name="code" class="input" placeholder="Entre ton code" required></div>
+<form method="POST" action="/login" id="loginForm">
+<div class="form-group"><label>Code Unique</label><input name="code" id="codeInput" class="input" placeholder="Entre ton code" required></div>
 <button class="btn">Se Connecter</button>
 </form>
 <p style="text-align:center; margin-top:15px; color:#8696A0;">Pas de compte? Crée en un <a href="/register" style="color:#00A884;">ici</a></p>
+<script>
+const savedCode = localStorage.getItem('genie_user_code');
+if(savedCode && !window.location.search.includes('logout')){
+    document.getElementById('codeInput').value = savedCode;
+    document.getElementById('loginForm').submit();
+}
+</script>
 {% endif %}
 </div></body></html>"""
 
@@ -298,7 +310,12 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false; let groupMode = false;
 
-socket.emit('join',{code:MY_CODE});
+localStorage.setItem('genie_user_code', MY_CODE);
+
+socket.on('connect', ()=>{
+    socket.emit('join',{code:MY_CODE});
+    syncMessages();
+});
 
 function openCreateGroup(){ groupMode=true; alert("Sélectionne les membres du groupe"); }
 function closeGroupPopup(){ document.getElementById('groupPopup').style.display='none'; }
@@ -384,7 +401,10 @@ const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
 const msgInput = document.getElementById('message');
 
-socket.on('connect',()=>socket.emit('join',{code:MY_CODE}));
+socket.on('connect',()=> {
+    socket.emit('join',{code:MY_CODE});
+    load();
+});
 
 function openViewer(src, type){
     document.getElementById('mediaViewer').style.display='flex';
@@ -409,9 +429,7 @@ function load(){
   let localMsgs = loadLocal();
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
-    if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
-      saveLocal(serverMsgs); render(serverMsgs);
-    }
+    saveLocal(serverMsgs); render(serverMsgs);
   }).catch(()=>{});
 }
 load();
@@ -508,8 +526,14 @@ GROUP_CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="w
 <script>
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const GROUP_ID="{{ group.id }}";
 let selectedMsgId = null; let mediaRecorder, audioChunks = []; let isRecording = false;
+const micBtn = document.getElementById('micBtn');
+const sendBtn = document.getElementById('sendBtn');
+const msgInput = document.getElementById('message');
 
-socket.on('connect',()=>socket.emit('join',{code:GROUP_ID}));
+socket.on('connect',()=> {
+    socket.emit('join',{code:GROUP_ID});
+    loadGroup();
+});
 
 function openViewer(src, type){
     document.getElementById('mediaViewer').style.display='flex';
@@ -634,7 +658,7 @@ def register():
 
 @app.route('/login', methods=['POST'])
 def do_login():
-    db = load_db(); code = request.form['code'].upper()
+    db = load_db(); code = request.form['code'].upper().strip()
     if code in db["USERS"]: session['code'] = code; return redirect('/')
     return "Code introuvable", 404
 
@@ -685,7 +709,7 @@ def update_chat_bg():
     save_db(db); return redirect('/settings')
 
 @app.route('/logout')
-def logout(): session.pop('code', None); return redirect('/')
+def logout(): session.pop('code', None); return redirect('/?logout=1')
 
 @app.route('/contacts')
 def contacts():
@@ -760,9 +784,9 @@ def chat(code_ami):
     ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
     initial = '' if ami['photo'] else avatar_letter(ami['nom'])
-    ami['initial'] = initial
+    ami_data = {"nom": ami['nom'], "photo": ami['photo'], "initial": initial}
     chat_bg = settings.get("chat_bg", "")
-    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
+    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami_data, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
 
 @app.route('/get_msg/<ami>')
 def get_msg(ami):
@@ -848,4 +872,4 @@ def handle_group_send(data):
 
 if __name__=='__main__':
     port = int(os.environ.get("PORT", 10000))
-    socketio.run(app,host='0.0.0.0',port=port)
+    socketio.run(app, host='0.0.0.0', port=port)
