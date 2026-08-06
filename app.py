@@ -3,14 +3,14 @@ eventlet.monkey_patch()
 
 from flask import Flask, render_template_string, request, redirect, session, url_for, jsonify, make_response
 from flask_socketio import SocketIO, emit, join_room, leave_room
-import json, os, base64, time, random, string, threading, copy
+import json, os, base64, time, random, string, threading
 from datetime import datetime, timedelta
 from io import BytesIO
 from PIL import Image
 
 app = Flask(__name__)
 app.secret_key = "genie_v33_whatsapp"
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet', ping_timeout=60, ping_interval=25)
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode='eventlet')
 
 CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
@@ -22,18 +22,17 @@ def load_db():
             try:
                 with open(DB_FILE, 'r', encoding='utf-8') as f: 
                     return json.load(f)
-            except: 
-                return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
+            except Exception: 
+                pass
         return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
 
 def save_db(db):
-    db_to_save = copy.deepcopy(db)
     def _save():
         try:
             with db_lock:
                 tmp = DB_FILE + ".tmp"
                 with open(tmp, "w", encoding='utf-8') as f: 
-                    json.dump(db_to_save, f, separators=(',', ':'), ensure_ascii=False)
+                    json.dump(db, f, separators=(',', ':'))
                 os.replace(tmp, DB_FILE)
         except Exception as e:
             print("Erreur save:", e)
@@ -106,7 +105,10 @@ def avatar_letter(nom):
     return nom[0].upper() if nom else "?"
 
 def get_user_settings(code, db):
-    if code not in db["SETTINGS"]: db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
+    if "SETTINGS" not in db:
+        db["SETTINGS"] = {}
+    if code not in db["SETTINGS"]: 
+        db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
     return db["SETTINGS"][code]
 
 LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -115,21 +117,13 @@ LOGIN_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=
 {% if code and nom %}
 <div class="alert">Bienvenue {{nom}}</div><label>TON CODE:</label><div class="code-info">{{ code }}</div>
 <a href="/contacts" class="btn">Accéder aux Chats</a>
-<a href="/logout" class="btn btn-gray" onclick="localStorage.clear();">Changer de Compte</a>
-<script>localStorage.setItem('genie_user_code', '{{ code }}');</script>
+<a href="/logout" class="btn btn-gray">Changer de Compte</a>
 {% else %}
-<form method="POST" action="/login" id="loginForm">
-<div class="form-group"><label>Code Unique</label><input name="code" id="codeInput" class="input" placeholder="Entre ton code" required></div>
+<form method="POST" action="/login">
+<div class="form-group"><label>Code Unique</label><input name="code" class="input" placeholder="Entre ton code" required></div>
 <button class="btn">Se Connecter</button>
 </form>
 <p style="text-align:center; margin-top:15px; color:#8696A0;">Pas de compte? Crée en un <a href="/register" style="color:#00A884;">ici</a></p>
-<script>
-const savedCode = localStorage.getItem('genie_user_code');
-if(savedCode && !window.location.search.includes('logout')){
-    document.getElementById('codeInput').value = savedCode;
-    document.getElementById('loginForm').submit();
-}
-</script>
 {% endif %}
 </div></body></html>"""
 
@@ -275,8 +269,8 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 {% endfor %}
 {% for c in contacts %}
 <div class="contact" data-code="{{ c }}" onmousedown="startLongPress('{{ c }}')" onmouseup="endLongPress()" onmouseleave="endLongPress()" ontouchstart="startLongPress('{{ c }}')" ontouchend="endLongPress()">
-<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
-<div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
+<div class="avatar" style="background-image:url('{{ users[c].photo if c in users else '' }}')">{{ users[c].initial if c in users else '?' }}</div>
+<div class="contact-info"><b>{{ users[c].nom if c in users else c }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 {% if unread.get(c, 0) > 0 %}<div class="badge">{{ unread[c] }}</div>{% endif %}
 </div>{% endfor %}</div>
 <div class="add-bar"><form method="POST" action="/ajouter" style="display:flex; width:100%; gap:10px;">
@@ -310,12 +304,7 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
 let selectedContacts = []; let longPressTimer; let isSelecting = false; let groupMode = false;
 
-localStorage.setItem('genie_user_code', MY_CODE);
-
-socket.on('connect', ()=>{
-    socket.emit('join',{code:MY_CODE});
-    syncMessages();
-});
+socket.emit('join',{code:MY_CODE});
 
 function openCreateGroup(){ groupMode=true; alert("Sélectionne les membres du groupe"); }
 function closeGroupPopup(){ document.getElementById('groupPopup').style.display='none'; }
@@ -363,8 +352,8 @@ ARCHIVES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <div class="header"><a href="/contacts" style="color:inherit; font-size:24px;">←</a><h2>Archives</h2><div></div></div>
 <div class="contact-list" id="contact-list">{% for c in archived %}
 <div class="contact" onclick="location='/chat/{{ c }}'">
-<div class="avatar" style="background-image:url('{{ users[c].photo }}')">{{ users[c].initial }}</div>
-<div class="contact-info"><b>{{ users[c].nom }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
+<div class="avatar" style="background-image:url('{{ users[c].photo if c in users else '' }}')">{{ users[c].initial if c in users else '?' }}</div>
+<div class="contact-info"><b>{{ users[c].nom if c in users else c }}</b><br><small style="color:#8696A0;">{{ c }}</small></div>
 </div>{% endfor %}</div>
 </body></html>"""
 
@@ -401,10 +390,7 @@ const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
 const msgInput = document.getElementById('message');
 
-socket.on('connect',()=> {
-    socket.emit('join',{code:MY_CODE});
-    load();
-});
+socket.on('connect',()=>socket.emit('join',{code:MY_CODE}));
 
 function openViewer(src, type){
     document.getElementById('mediaViewer').style.display='flex';
@@ -429,7 +415,9 @@ function load(){
   let localMsgs = loadLocal();
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
-    saveLocal(serverMsgs); render(serverMsgs);
+    if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
+      saveLocal(serverMsgs); render(serverMsgs);
+    }
   }).catch(()=>{});
 }
 load();
@@ -458,24 +446,27 @@ document.getElementById('chatFileInput').onchange = e => {
     reader.readAsDataURL(file);
 }
 
-micBtn.onmousedown=micBtn.ontouchstart=async()=>{
+micBtn.onmousedown=micBtn.ontouchstart=async(e)=>{
+  e.preventDefault();
   micBtn.classList.add('recording');
-  const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-  mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
-  audioChunks = [];
-  mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-  mediaRecorder.onstop=()=>{
-    const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
-    const reader = new FileReader();
-    reader.onloadend=()=>{
-      const base64Audio = reader.result;
-      let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-      let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
-      sendData(data);
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    mediaRecorder = new MediaRecorder(stream, {mimeType: 'audio/webm'});
+    audioChunks = [];
+    mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
+    mediaRecorder.onstop=()=>{
+      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+      const reader = new FileReader();
+      reader.onloadend=()=>{
+        const base64Audio = reader.result;
+        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+        let data={to:AMI_CODE,from:MY_CODE,from_nom:"{{ my_nom }}",msg:base64Audio,time:t,id:id,type:'audio',status:'sent'};
+        sendData(data);
+      }
+      reader.readAsDataURL(audioBlob);
     }
-    reader.readAsDataURL(audioBlob);
-  }
-  mediaRecorder.start();
+    mediaRecorder.start();
+  } catch(err){ console.error(err); }
 }
 micBtn.onmouseup=micBtn.ontouchend=()=>{
   if(mediaRecorder && mediaRecorder.state!='inactive'){mediaRecorder.stop();}
@@ -530,10 +521,7 @@ const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
 const msgInput = document.getElementById('message');
 
-socket.on('connect',()=> {
-    socket.emit('join',{code:GROUP_ID});
-    loadGroup();
-});
+socket.on('connect',()=>socket.emit('join',{code:GROUP_ID}));
 
 function openViewer(src, type){
     document.getElementById('mediaViewer').style.display='flex';
@@ -581,20 +569,22 @@ document.getElementById('groupFileInput').onchange = e => {
 micBtn.onclick=async()=>{
   if(!isRecording){
     isRecording=true; micBtn.classList.add('recording');
-    const stream = await navigator.mediaDevices.getUserMedia({audio:true});
-    mediaRecorder = new MediaRecorder(stream);
-    audioChunks = [];
-    mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
-    mediaRecorder.onstop=()=>{
-      const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
-      const reader = new FileReader();
-      reader.onloadend=()=>{
-        let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
-        sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:reader.result,time:t,id:id,type:'audio'});
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio:true});
+      mediaRecorder = new MediaRecorder(stream);
+      audioChunks = [];
+      mediaRecorder.ondataavailable=e=>audioChunks.push(e.data);
+      mediaRecorder.onstop=()=>{
+        const audioBlob = new Blob(audioChunks,{type:'audio/webm'});
+        const reader = new FileReader();
+        reader.onloadend=()=>{
+          let t=new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});let id='m'+Date.now();
+          sendData({group:GROUP_ID,from:MY_CODE,from_nom:"{{ my_nom }}",msg:reader.result,time:t,id:id,type:'audio'});
+        }
+        reader.readAsDataURL(audioBlob);
       }
-      reader.readAsDataURL(audioBlob);
-    }
-    mediaRecorder.start();
+      mediaRecorder.start();
+    } catch(err) { console.error(err); isRecording=false; micBtn.classList.remove('recording'); }
   } else {
     isRecording=false; micBtn.classList.remove('recording');
     if(mediaRecorder){ mediaRecorder.stop(); }
@@ -645,14 +635,18 @@ def register():
     if request.form.get('original_img'):
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
+            img_data = request.form['original_img'].split(',')[1]
+            img = Image.open(BytesIO(base64.b64decode(img_data)))
             size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
             photo = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
-        except: pass
+        except Exception as e: 
+            print("Register crop error:", e)
     db["USERS"][code] = {"nom": nom, "photo": photo, "contacts": []}
+    if "SETTINGS" not in db: db["SETTINGS"] = {}
     db["SETTINGS"][code] = {"theme": "noir", "chat_bg": "", "group_bg": {}}
+    if "ARCHIVED" not in db: db["ARCHIVED"] = {}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
     save_db(db); session['code'] = code; return redirect('/')
 
@@ -665,20 +659,21 @@ def do_login():
 @app.route('/settings')
 def settings():
     code, user, db = get_user()
-    if not code: return redirect('/')
-    settings = get_user_settings(code, db)
-    initial = '' if user['photo'] else avatar_letter(user['nom'])
-    return render_template_string(SETTINGS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], code=code, initial=initial, theme=settings["theme"])
+    if not code or not user: return redirect('/')
+    st = get_user_settings(code, db)
+    initial = '' if user.get('photo') else avatar_letter(user.get('nom', ''))
+    return render_template_string(SETTINGS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), nom=user['nom'], photo=user.get('photo',''), code=code, initial=initial, theme=st["theme"])
 
 @app.route('/update_profile', methods=['POST'])
 def update_profile():
     code, user, db = get_user()
-    if not code: return redirect('/')
+    if not code or not user: return redirect('/')
     user['nom'] = request.form['nom']
-    if request.form.get('original_img') and request.form.get('original_img')!= "":
+    if request.form.get('original_img') and request.form.get('original_img') != "":
         try:
             x=float(request.form.get('crop_x','0')); y=float(request.form.get('crop_y','0')); s=float(request.form.get('crop_scale','1'))
-            img = Image.open(BytesIO(base64.b64decode(request.form['original_img'].split(',')[1])))
+            img_data = request.form['original_img'].split(',')[1]
+            img = Image.open(BytesIO(base64.b64decode(img_data)))
             size=200; cx=img.width/2; cy=img.height/2; left=cx-(size/2)/s-x/s; top=cy-(size/2)/s-y/s; right=cx+(size/2)/s-x/s; bottom=cy+(size/2)/s-y/s
             img = img.crop((left,top,right,bottom)).resize((150,150), Image.LANCZOS)
             buf = BytesIO(); img.save(buf, format="PNG")
@@ -691,7 +686,7 @@ def update_theme():
     code, user, db = get_user()
     if not code: return redirect('/')
     theme = request.form['theme']
-    db["SETTINGS"][code]["theme"] = theme
+    get_user_settings(code, db)["theme"] = theme
     save_db(db); return redirect('/settings')
 
 @app.route('/update_chat_bg', methods=['POST'])
@@ -700,56 +695,58 @@ def update_chat_bg():
     if not code: return redirect('/')
     if 'chat_bg' in request.files:
         file = request.files['chat_bg']
-        if file.filename!= '':
+        if file.filename != '':
             img = Image.open(file.stream)
             img = img.resize((1080, 1920))
             buf = BytesIO(); img.save(buf, format="JPEG", quality=70)
             bg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
-            db["SETTINGS"][code]["chat_bg"] = bg
+            get_user_settings(code, db)["chat_bg"] = bg
     save_db(db); return redirect('/settings')
 
 @app.route('/logout')
-def logout(): session.pop('code', None); return redirect('/?logout=1')
+def logout(): session.pop('code', None); return redirect('/')
 
 @app.route('/contacts')
 def contacts():
     code, user, db = get_user()
-    if not code: return redirect('/')
-    settings = get_user_settings(code, db)
-    user_unread = db["UNREAD"].get(code, {})
-    archived = db["ARCHIVED"].get(code, [])
-    active_contacts = [c for c in user['contacts'] if c not in archived]
-    user_groups = [g for g in db["GROUPS"].values() if code in g['members']]
+    if not code or not user: return redirect('/')
+    st = get_user_settings(code, db)
+    user_unread = db.get("UNREAD", {}).get(code, {})
+    archived = db.get("ARCHIVED", {}).get(code, [])
+    active_contacts = [c for c in user.get('contacts', []) if c not in archived]
+    user_groups = [g for g in db.get("GROUPS", {}).values() if code in g.get('members', [])]
 
     users_data = {}
-    for c, u in db["USERS"].items():
-        initial = '' if u['photo'] else avatar_letter(u['nom'])
-        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": initial}
+    for c, u in db.get("USERS", {}).items():
+        initial = '' if u.get('photo') else avatar_letter(u.get('nom', ''))
+        users_data[c] = {"nom": u.get('nom', ''), "photo": u.get('photo', ''), "initial": initial}
 
-    my_initial = '' if user['photo'] else avatar_letter(user['nom'])
-    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), nom=user['nom'], photo=user['photo'], initial=my_initial, users=users_data, contacts=active_contacts, groups=user_groups, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
+    my_initial = '' if user.get('photo') else avatar_letter(user.get('nom', ''))
+    return render_template_string(CONTACTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), nom=user['nom'], photo=user.get('photo',''), initial=my_initial, users=users_data, contacts=active_contacts, groups=user_groups, unread=user_unread, my_code=code, central=CENTRAL_SERVER)
 
 @app.route('/archives')
 def archives():
     code, user, db = get_user()
     if not code: return redirect('/')
-    settings = get_user_settings(code, db)
-    archived = db["ARCHIVED"].get(code, [])
+    st = get_user_settings(code, db)
+    archived = db.get("ARCHIVED", {}).get(code, [])
     users_data = {}
-    for c, u in db["USERS"].items():
-        initial = '' if u['photo'] else avatar_letter(u['nom'])
-        users_data[c] = {"nom": u['nom'], "photo": u['photo'], "initial": initial}
-    return render_template_string(ARCHIVES_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), users=users_data, archived=archived)
+    for c, u in db.get("USERS", {}).items():
+        initial = '' if u.get('photo') else avatar_letter(u.get('nom', ''))
+        users_data[c] = {"nom": u.get('nom', ''), "photo": u.get('photo', ''), "initial": initial}
+    return render_template_string(ARCHIVES_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), users=users_data, archived=archived)
 
 @app.route('/delete_contacts', methods=['POST'])
 def delete_contacts():
     code, user, db = get_user()
-    if not code: return jsonify({"status":"error"}), 403
+    if not code or not user: return jsonify({"status":"error"}), 403
     data = request.json
-    for c in data['contacts']:
-        if c in user['contacts']: user['contacts'].remove(c)
+    for c in data.get('contacts', []):
+        if c in user.get('contacts', []): 
+            user['contacts'].remove(c)
         cle = "-".join(sorted([code, c]))
-        if cle in db["MESSAGES"]: del db["MESSAGES"][cle]
+        if cle in db.get("MESSAGES", {}): 
+            del db["MESSAGES"][cle]
     db["USERS"][code] = user; save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/archive_contacts', methods=['POST'])
@@ -757,15 +754,16 @@ def archive_contacts():
     code, user, db = get_user()
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
+    if "ARCHIVED" not in db: db["ARCHIVED"] = {}
     if code not in db["ARCHIVED"]: db["ARCHIVED"][code] = []
-    for c in data['contacts']:
+    for c in data.get('contacts', []):
         if c not in db["ARCHIVED"][code]: db["ARCHIVED"][code].append(c)
     save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/ajouter', methods=['GET', 'POST'])
 def ajouter():
     code, user, db = get_user()
-    if not code: return redirect('/')
+    if not code or not user: return redirect('/')
     if request.method == 'GET': return redirect('/contacts')
     code_ami = request.form['code_ami'].upper().strip()
     if code_ami in db["USERS"]:
@@ -777,22 +775,23 @@ def ajouter():
 @app.route('/chat/<code_ami>')
 def chat(code_ami):
     code, user, db = get_user()
-    if not code: return redirect('/')
-    settings = get_user_settings(code, db)
-    if code in db["UNREAD"] and code_ami in db["UNREAD"][code]:
+    if not code or not user: return redirect('/')
+    st = get_user_settings(code, db)
+    if code in db.get("UNREAD", {}) and code_ami in db["UNREAD"][code]:
         db["UNREAD"][code][code_ami] = 0; save_db(db)
     ami = db["USERS"].get(code_ami)
     if not ami: return "Contact introuvable", 404
-    initial = '' if ami['photo'] else avatar_letter(ami['nom'])
-    ami_data = {"nom": ami['nom'], "photo": ami['photo'], "initial": initial}
-    chat_bg = settings.get("chat_bg", "")
-    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami_data, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
+    initial = '' if ami.get('photo') else avatar_letter(ami.get('nom', ''))
+    ami['initial'] = initial
+    chat_bg = st.get("chat_bg", "")
+    return render_template_string(CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), central=CENTRAL_SERVER, code_ami=code_ami, ami=ami, my_code=code, my_nom=user['nom'], chat_bg=chat_bg)
 
 @app.route('/get_msg/<ami>')
 def get_msg(ami):
     code, _, db = get_user()
+    if not code: return jsonify([])
     cle = "-".join(sorted([code, ami]))
-    return jsonify(db["MESSAGES"].get(cle, []))
+    return jsonify(db.get("MESSAGES", {}).get(cle, []))
 
 @app.route('/create_group', methods=['POST'])
 def create_group():
@@ -800,58 +799,75 @@ def create_group():
     if not code: return jsonify({"status":"error"}), 403
     data = request.json
     g_id = gen_code_port()
-    db["GROUPS"][g_id] = {"id": g_id, "name": data['name'], "owner": code, "members": [code]+data['members'], "photo": ""}
+    if "GROUPS" not in db: db["GROUPS"] = {}
+    if "GROUP_MSGS" not in db: db["GROUP_MSGS"] = {}
+    
+    db["GROUPS"][g_id] = {"id": g_id, "name": data['name'], "owner": code, "members": [code]+data.get('members', []), "photo": ""}
     db["GROUP_MSGS"][g_id] = []
-    db["SETTINGS"][code]["group_bg"][g_id] = ""
+    
+    st = get_user_settings(code, db)
+    if "group_bg" not in st: st["group_bg"] = {}
+    st["group_bg"][g_id] = ""
     save_db(db)
     return jsonify({"status":"ok", "id": g_id})
 
 @app.route('/get_group_msgs/<g_id>')
 def get_group_msgs(g_id):
     db = load_db()
-    return jsonify(db["GROUP_MSGS"].get(g_id, []))
+    return jsonify(db.get("GROUP_MSGS", {}).get(g_id, []))
 
 @app.route('/group/<g_id>')
 def group_chat(g_id):
     code, user, db = get_user()
-    if not code: return redirect('/')
-    settings = get_user_settings(code, db)
-    group = db["GROUPS"].get(g_id)
+    if not code or not user: return redirect('/')
+    st = get_user_settings(code, db)
+    group = db.get("GROUPS", {}).get(g_id)
     if not group: return "Groupe introuvable", 404
-    group_bg = settings["group_bg"].get(g_id, "")
-    return render_template_string(GROUP_CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), group=group, my_code=code, my_nom=user['nom'], central=CENTRAL_SERVER, group_bg=group_bg)
+    group_bg = st.get("group_bg", {}).get(g_id, "")
+    return render_template_string(GROUP_CHAT_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(st["theme"]), group=group, my_code=code, my_nom=user['nom'], central=CENTRAL_SERVER, group_bg=group_bg)
 
 @app.route('/update_group_bg', methods=['POST'])
 def update_group_bg():
     code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    db["SETTINGS"][code]["group_bg"][data['group']] = data['bg']
+    st = get_user_settings(code, db)
+    if "group_bg" not in st: st["group_bg"] = {}
+    st["group_bg"][data['group']] = data['bg']
     save_db(db); return jsonify({"status":"ok"})
 
 @app.route('/delete_msg', methods=['POST'])
 def delete_msg():
     code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    if data['mode'] == 'all':
-        if data['type']=='pv':
+    if data.get('mode') == 'all':
+        if data.get('type') == 'pv':
             cle = "-".join(sorted([code, data['ami']]))
-            db["MESSAGES"][cle] = [m for m in db["MESSAGES"].get(cle,[]) if m['id']!=data['id']]
+            if cle in db.get("MESSAGES", {}):
+                db["MESSAGES"][cle] = [m for m in db["MESSAGES"][cle] if m.get('id') != data.get('id')]
         else:
-            db["GROUP_MSGS"][data['group']] = [m for m in db["GROUP_MSGS"].get(data['group'],[]) if m['id']!=data['id']]
+            g_id = data.get('group')
+            if g_id in db.get("GROUP_MSGS", {}):
+                db["GROUP_MSGS"][g_id] = [m for m in db["GROUP_MSGS"][g_id] if m.get('id') != data.get('id')]
     save_db(db); return jsonify({"status":"ok"})
 
 @socketio.on('join')
-def on_join(data): join_room(data['code'])
+def on_join(data): 
+    if isinstance(data, dict) and 'code' in data:
+        join_room(data['code'])
 
 @socketio.on('send_message')
 def handle_send(data):
     db = load_db()
     cle = "-".join(sorted([data['to'], data['from']]))
+    if "MESSAGES" not in db: db["MESSAGES"] = {}
     if cle not in db["MESSAGES"]: db["MESSAGES"][cle] = []
     db["MESSAGES"][cle].append(data)
 
     dest = data['to']
     src = data['from']
+    if "UNREAD" not in db: db["UNREAD"] = {}
     if dest not in db["UNREAD"]: db["UNREAD"][dest] = {}
     if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
     db["UNREAD"][dest][src] += 1
@@ -865,6 +881,7 @@ def handle_send(data):
 def handle_group_send(data):
     db = load_db()
     g_id = data['group']
+    if "GROUP_MSGS" not in db: db["GROUP_MSGS"] = {}
     if g_id not in db["GROUP_MSGS"]: db["GROUP_MSGS"][g_id] = []
     db["GROUP_MSGS"][g_id].append(data)
     save_db(db)
