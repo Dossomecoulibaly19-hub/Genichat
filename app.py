@@ -20,9 +20,25 @@ def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
             try:
-                with open(DB_FILE) as f: return json.load(f)
-            except: return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
-        return {"USERS": {}, "MESSAGES": {}, "UNREAD": {}, "ARCHIVED": {}, "SETTINGS": {}, "GROUPS": {}, "GROUP_MSGS": {}}
+                with open(DB_FILE) as f: db = json.load(f)
+            except: db = {}
+        else:
+            db = {}
+        
+        # Initialisation par défaut pour rétrocompatibilité
+        if "USERS" not in db: db["USERS"] = {}
+        if "MESSAGES" not in db: db["MESSAGES"] = {}
+        if "UNREAD" not in db: db["UNREAD"] = {}
+        if "ARCHIVED" not in db: db["ARCHIVED"] = {}
+        if "SETTINGS" not in db: db["SETTINGS"] = {}
+        if "GROUPS" not in db: db["GROUPS"] = {}
+        if "GROUP_MSGS" not in db: db["GROUP_MSGS"] = {}
+        if "STATUSES" not in db: db["STATUSES"] = {}
+        if "STATUS_COMMENTS" not in db: db["STATUS_COMMENTS"] = {}
+        if "CHANNELS" not in db: db["CHANNELS"] = {}
+        if "CHANNEL_MSGS" not in db: db["CHANNEL_MSGS"] = {}
+        
+        return db
 
 def save_db(db):
     def _save():
@@ -39,8 +55,26 @@ def gen_code_port():
     db = load_db()
     while True:
         code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
-        if code not in db["USERS"] and code not in db["GROUPS"]:
+        if code not in db["USERS"] and code not in db["GROUPS"] and code not in db["CHANNELS"]:
             return code
+
+def cleanup_statuses(db):
+    """ Supprime automatiquement les statuts de plus de 24h """
+    now = time.time()
+    twenty_four_hours = 24 * 3600
+    modified = False
+    
+    # Nettoyage des statuts
+    for status_id in list(db["STATUSES"].keys()):
+        status = db["STATUSES"][status_id]
+        if now - status.get("timestamp", 0) > twenty_four_hours:
+            del db["STATUSES"][status_id]
+            if status_id in db["STATUS_COMMENTS"]:
+                del db["STATUS_COMMENTS"][status_id]
+            modified = True
+            
+    if modified:
+        save_db(db)
 
 def get_theme_css(theme):
     if theme == "blanc":
@@ -50,7 +84,7 @@ def get_theme_css(theme):
 
 CSS_BASE = """* {box-sizing: border-box; margin:0; padding:0; font-family: 'Segoe UI', Roboto, sans-serif; -webkit-user-select:none; user-select:none;}
 .header {padding:12px 16px; display:flex; align-items:center; justify-content:space-between; position:sticky; top:0; z-index:10;}
-.header-actions{display:flex; gap:15px;}
+.header-actions{display:flex; gap:15px; align-items:center;}
 .btn {background:#00A884; color:white; border:none; padding:14px 15px; border-radius:10px; cursor:pointer; font-weight:600; width:100%; margin-top:12px; font-size:16px; text-decoration:none; display:block; text-align:center;}
 .btn-danger {background:#D93025;}
 .btn-gray {background:#2A3942;}
@@ -97,6 +131,15 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .context-menu button:hover {background:#344854;}
 .chat-img {max-width:220px; max-height:220px; object-fit:cover; border-radius:8px; cursor:pointer; margin-top:4px;}
 .chat-video {max-width:220px; max-height:220px; border-radius:8px; cursor:pointer; margin-top:4px;}
+
+/* NOUVELLES EXTENSIONS CSS POUR STATUTS ET CHAÎNES */
+.nav-tabs {display:flex; background:#202C33; border-bottom:1px solid #2A3942; position:sticky; top:60px; z-index:9;}
+.tab-item {flex:1; padding:12px; text-align:center; color:#8696A0; text-decoration:none; font-weight:bold; font-size:14px; border-bottom:3px solid transparent;}
+.tab-item.active {color:#00A884; border-bottom:3px solid #00A884;}
+.tiktok-container {height:100vh; overflow-y:scroll; snap-type:y mandatory; scroll-snap-type:y mandatory; background:#000;}
+.tiktok-slide {height:100vh; width:100vw; snap-align:start; scroll-snap-align:start; position:relative; display:flex; justify-content:center; align-items:center;}
+.tiktok-media {max-width:100%; max-height:100%; object-fit:contain;}
+.tiktok-overlay {position:absolute; bottom:20px; left:20px; right:20px; color:white; text-shadow:0 1px 3px rgba(0,0,0,0.8);}
 """
 
 def avatar_letter(nom):
@@ -243,6 +286,12 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <a href="#" onclick="openCreateGroup()" style="color:inherit; text-decoration:none; font-size:20px;">👥</a>
 <a href="/settings"><div class="avatar" style="background-image:url('{{ photo }}')">{{ initial }}</div></a>
 </div>
+</div>
+
+<div class="nav-tabs">
+<a href="/contacts" class="tab-item active">💬 Discussions</a>
+<a href="/statuses" class="tab-item">⭕ Statuts</a>
+<a href="/channels" class="tab-item">📢 Chaînes</a>
 </div>
 
 <div class="header" id="selectionHeader" style="display:none; background:#D93025;">
@@ -625,17 +674,414 @@ function changeGroupBg(){
 }
 </script></body></html>"""
 
+STATUSES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Statuts</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style></head><body style="display:flex; flex-direction:column; height:100vh;">
+<div class="header">
+<a href="/contacts" style="color:inherit; font-size:24px;">←</a>
+<h2>Statut</h2>
+<a href="/status_comments_page" style="color:inherit; font-size:20px; text-decoration:none;">💬</a>
+</div>
+
+<div class="nav-tabs">
+<a href="/contacts" class="tab-item">💬 Discussions</a>
+<a href="/statuses" class="tab-item active">⭕ Statuts</a>
+<a href="/channels" class="tab-item">📢 Chaînes</a>
+</div>
+
+<div style="padding:15px;">
+<button onclick="document.getElementById('statusFile').click()" class="btn">➕ Ajouter statut</button>
+<input type="file" id="statusFile" accept="image/*,video/*" style="display:none;" onchange="handleStatusSelect(event)">
+</div>
+
+<div class="contact-list" id="status-list">
+<h3 style="padding:10px 16px; color:#8696A0; font-size:14px;">Mises à jour récentes</h3>
+{% for code, data in contact_statuses.items() %}
+<div class="contact" onclick="viewStatus('{{ code }}')">
+<div class="avatar" style="background-image:url('{{ data.user.photo }}'); border:2px solid #00A884;">{{ data.user.initial }}</div>
+<div class="contact-info"><b>{{ data.user.nom }}</b><br><small style="color:#8696A0;">{{ data.list|length }} statut(s)</small></div>
+</div>
+{% else %}
+<p style="text-align:center; padding:20px; color:#8696A0;">Aucun statut disponible</p>
+{% endfor %}
+</div>
+
+<div style="padding:15px;">
+<a href="/explore_statuses" class="btn btn-gray" style="display:flex; align-items:center; justify-content:center; gap:8px;">🔍 Explorer les statuts (TikTok)</a>
+</div>
+
+<!-- Modal d'édition de Statut (Image / Vidéo, Stickers, Texte, Découpage) -->
+<div class="crop-modal" id="statusEditorModal" style="z-index:200;">
+<div style="position:absolute; top:15px; left:15px; right:15px; display:flex; justify-content:space-between; z-index:205;">
+<button class="btn btn-gray" style="width:auto; margin:0;" onclick="closeStatusEditor()">✕</button>
+<button class="btn" style="width:auto; margin:0;" onclick="publishStatus()">Publier</button>
+</div>
+<div class="crop-area" id="editorCanvasArea">
+<img id="editorImage" class="crop-img" style="display:none;">
+<video id="editorVideo" controls style="max-width:100%; max-height:70vh; display:none;"></video>
+<div id="overlayText" style="position:absolute; color:white; font-size:24px; font-weight:bold; text-shadow:0 2px 4px #000; cursor:move;"></div>
+</div>
+<div style="position:absolute; bottom:20px; width:90%; display:flex; flex-direction:column; gap:8px; z-index:205;">
+<input id="stickerInput" class="input" placeholder="Ajouter un sticker (ex: 🔥, ❤️, ⭐)" onchange="addSticker(this.value)">
+<input id="textOverlayInput" class="input" placeholder="Écrire sur le média..." oninput="updateTextOverlay(this.value)">
+<div id="videoCutControls" style="display:none; color:white; text-align:center;">
+<small>Découpage Vidéo (secondes):</small>
+<div style="display:flex; gap:10px;">
+<input type="number" id="videoStart" class="input" placeholder="Début (s)" value="0">
+<input type="number" id="videoEnd" class="input" placeholder="Fin (s)" value="15">
+</div>
+</div>
+</div>
+</div>
+
+<!-- Modal de Visionnement de Statut -->
+<div class="media-viewer" id="statusViewerModal" style="z-index:300;">
+<div style="position:absolute; top:15px; left:15px; right:15px; display:flex; justify-content:space-between; color:white; align-items:center; z-index:305;">
+<b id="viewerUserNom">Nom</b>
+<div>
+<a id="saveStatusBtn" class="btn btn-gray" style="display:inline-block; width:auto; padding:8px 12px; margin:0;" download>💾 Enregistrer</a>
+<button class="btn btn-gray" style="display:inline-block; width:auto; padding:8px 12px; margin:0;" onclick="closeStatusViewer()">✕</button>
+</div>
+</div>
+<div id="statusMediaContainer" style="width:100%; height:70vh; display:flex; justify-content:center; align-items:center;" onclick="nextStatus()"></div>
+<div style="position:absolute; bottom:15px; width:90%; display:flex; gap:10px; z-index:305;">
+<input id="statusCommentInput" class="input" placeholder="Répondre au statut...">
+<button class="btn" style="width:80px; margin:0;" onclick="sendStatusComment()">Envoyer</button>
+</div>
+</div>
+
+<script>
+let selectedStatusMedia = null;
+let currentMediaData = null;
+let currentContactStatuses = [];
+let currentStatusIndex = 0;
+let currentViewingUser = "";
+
+function handleStatusSelect(e){
+    const file = e.target.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        currentMediaData = { src: ev.target.result, type: file.type.startsWith('video')?'video':'image' };
+        openStatusEditor();
+    };
+    reader.readAsDataURL(file);
+}
+
+function openStatusEditor(){
+    document.getElementById('statusEditorModal').style.display = 'flex';
+    if(currentMediaData.type === 'image'){
+        const img = document.getElementById('editorImage');
+        img.src = currentMediaData.src; img.style.display = 'block';
+        document.getElementById('editorVideo').style.display = 'none';
+        document.getElementById('videoCutControls').style.display = 'none';
+    } else {
+        const vid = document.getElementById('editorVideo');
+        vid.src = currentMediaData.src; vid.style.display = 'block';
+        document.getElementById('editorImage').style.display = 'none';
+        document.getElementById('videoCutControls').style.display = 'block';
+    }
+}
+
+function closeStatusEditor(){ document.getElementById('statusEditorModal').style.display = 'none'; }
+function addSticker(val){ if(val) document.getElementById('overlayText').innerText += " " + val; }
+function updateTextOverlay(val){ document.getElementById('overlayText').innerText = val; }
+
+function publishStatus(){
+    const text = document.getElementById('textOverlayInput').value;
+    fetch('/publish_status', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            media: currentMediaData.src,
+            type: currentMediaData.type,
+            text_overlay: text
+        })
+    }).then(r=>r.json()).then(res=>{
+        if(res.status==='ok') location.reload();
+    });
+}
+
+const allStatuses = {{ contact_statuses|tojson }};
+
+function viewStatus(code){
+    if(!allStatuses[code]) return;
+    currentViewingUser = code;
+    currentContactStatuses = allStatuses[code].list;
+    currentStatusIndex = 0;
+    document.getElementById('viewerUserNom').innerText = allStatuses[code].user.nom;
+    document.getElementById('statusViewerModal').style.display = 'flex';
+    renderCurrentStatus();
+}
+
+function renderCurrentStatus(){
+    if(currentStatusIndex >= currentContactStatuses.length){ closeStatusViewer(); return; }
+    const st = currentContactStatuses[currentStatusIndex];
+    const container = document.getElementById('statusMediaContainer');
+    document.getElementById('saveStatusBtn').href = st.media;
+    if(st.type === 'image'){
+        container.innerHTML = `<div style="position:relative;"><img src="${st.media}" style="max-width:100%; max-height:70vh;"><div style="position:absolute; bottom:10px; left:10px; color:white; font-size:20px; text-shadow:0 2px 4px #000;">${st.text_overlay || ''}</div></div>`;
+    } else {
+        container.innerHTML = `<div style="position:relative;"><video src="${st.media}" autoplay controls style="max-width:100%; max-height:70vh;"></video><div style="position:absolute; bottom:10px; left:10px; color:white; font-size:20px; text-shadow:0 2px 4px #000;">${st.text_overlay || ''}</div></div>`;
+    }
+}
+
+function nextStatus(){ currentStatusIndex++; renderCurrentStatus(); }
+function closeStatusViewer(){ document.getElementById('statusViewerModal').style.display = 'none'; }
+
+function sendStatusComment(){
+    const comment = document.getElementById('statusCommentInput').value;
+    if(!comment) return;
+    const currentStatus = currentContactStatuses[currentStatusIndex];
+    fetch('/comment_status', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+            status_id: currentStatus.id,
+            owner_code: currentViewingUser,
+            comment: comment
+        })
+    }).then(r=>r.json()).then(res=>{
+        alert("Commentaire envoyé!");
+        document.getElementById('statusCommentInput').value = '';
+    });
+}
+</script>
+</body></html>"""
+
+STATUS_COMMENTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Commentaires des Statuts</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style></head><body>
+<div class="header"><a href="/statuses" style="color:inherit; font-size:24px;">←</a><h2>Commentaires Statuts</h2><div></div></div>
+<div class="contact-list">
+{% for c in comments %}
+<div class="contact">
+<div class="avatar" style="background-image:url('{{ users[c.from].photo if c.from in users else '' }}')">💬</div>
+<div class="contact-info">
+<b>{{ users[c.from].nom if c.from in users else c.from }}</b><br>
+<span>{{ c.comment }}</span><br>
+<small style="color:#8696A0;">{{ c.time }}</small>
+</div>
+</div>
+{% else %}
+<p style="text-align:center; padding:20px; color:#8696A0;">Aucun commentaire reçu pour le moment.</p>
+{% endfor %}
+</div>
+</body></html>"""
+
+EXPLORE_STATUSES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Explorer les Statuts</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style></head><body style="background:#000; overflow:hidden;">
+<div style="position:fixed; top:15px; left:15px; z-index:100;">
+<a href="/statuses" class="btn btn-gray" style="width:auto; padding:8px 15px; text-decoration:none;">← Retour</a>
+</div>
+<div class="tiktok-container">
+{% for st in explore_statuses %}
+<div class="tiktok-slide">
+{% if st.type == 'image' %}
+<img src="{{ st.media }}" class="tiktok-media">
+{% else %}
+<video src="{{ st.media }}" controls autoplay loop class="tiktok-media"></video>
+{% endif %}
+<div class="tiktok-overlay">
+<b>@{{ users[st.user_code].nom if st.user_code in users else 'Inconnu' }}</b>
+<p>{{ st.text_overlay }}</p>
+</div>
+</div>
+{% else %}
+<div class="tiktok-slide"><h3 style="color:white;">Aucun statut à explorer</h3></div>
+{% endfor %}
+</div>
+</body></html>"""
+
+CHANNELS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chaînes</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style></head><body style="display:flex; flex-direction:column; height:100vh;">
+<div class="header"><a href="/contacts" style="color:inherit; font-size:24px;">←</a><h2>Chaînes</h2><div></div></div>
+
+<div class="nav-tabs">
+<a href="/contacts" class="tab-item">💬 Discussions</a>
+<a href="/statuses" class="tab-item">⭕ Statuts</a>
+<a href="/channels" class="tab-item active">📢 Chaînes</a>
+</div>
+
+<div style="padding:15px;">
+<button onclick="openConfigChannel()" class="btn">📢 Créer une chaîne</button>
+<input id="searchChannel" class="input" placeholder="Rechercher une chaîne publique..." oninput="searchChannels(this.value)">
+</div>
+
+<div class="contact-list" id="channel-list">
+{% for ch in channels %}
+<div class="contact" onclick="location='/channel/{{ ch.id }}'">
+<div class="avatar" style="background-image:url('{{ ch.photo }}')">📢</div>
+<div class="contact-info">
+<b>{{ ch.name }}</b><br>
+<small style="color:#8696A0;">{{ ch.followers|length }} Followers • {{ ch.visitors }} Visiteurs</small>
+</div>
+</div>
+{% else %}
+<p style="text-align:center; padding:20px; color:#8696A0;">Aucune chaîne disponible</p>
+{% endfor %}
+</div>
+
+<!-- Modal Configuration Création de Chaîne -->
+<div class="popup" id="configChannelPopup">
+<div class="popup-box">
+<h3>Configurer la Chaîne</h3>
+<div id="channelPreview" class="avatar-big" style="margin-bottom:10px;">📢</div>
+<label for="channelPhoto" class="btn btn-gray" style="margin-bottom:10px;">📷 Photo Chaîne</label>
+<input type="file" id="channelPhoto" accept="image/*" style="display:none;" onchange="handleChannelPhoto(event)">
+<input id="channelNameInput" class="input" placeholder="Nom de la chaîne">
+<div class="popup-buttons">
+<button class="btn btn-gray" onclick="closeConfigChannel()">Annuler</button>
+<button class="btn" onclick="enterChannelCreation()">Rentrer dans chaîne</button>
+</div>
+</div>
+</div>
+
+<script>
+let channelPhotoData = "";
+function openConfigChannel(){ document.getElementById('configChannelPopup').style.display = 'flex'; }
+function closeConfigChannel(){ document.getElementById('configChannelPopup').style.display = 'none'; }
+
+function handleChannelPhoto(e){
+    const file = e.target.files[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = function(ev){
+        channelPhotoData = ev.target.result;
+        document.getElementById('channelPreview').style.backgroundImage = `url(${channelPhotoData})`;
+        document.getElementById('channelPreview').innerText = '';
+    };
+    reader.readAsDataURL(file);
+}
+
+function enterChannelCreation(){
+    const name = document.getElementById('channelNameInput').value;
+    if(!name){ alert("Veuillez entrer un nom"); return; }
+    fetch('/create_channel', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ name: name, photo: channelPhotoData })
+    }).then(r=>r.json()).then(res=>{
+        if(res.status==='ok') location.href = '/channel/' + res.id;
+    });
+}
+
+function searchChannels(query){
+    const items = document.querySelectorAll('#channel-list .contact');
+    items.forEach(it => {
+        if(it.innerText.toLowerCase().includes(query.toLowerCase())){
+            it.style.display = 'flex';
+        } else {
+            it.style.display = 'none';
+        }
+    });
+}
+</script>
+</body></html>"""
+
+CHANNEL_VIEW_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ channel.name }}</title><style>{{ CSS_BASE }}{{ THEME_CSS }}</style><script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script></head><body style="display:flex; flex-direction:column; height:100vh;">
+<div class="header">
+<a href="/channels" style="color:inherit; font-size:24px;">←</a>
+<div class="avatar" style="background-image:url('{{ channel.photo }}')">📢</div>
+<div>
+<b>{{ channel.name }}</b><br>
+<small style="color:#8696A0;">{{ channel.followers|length }} Followers • {{ channel.visitors }} Visiteurs</small>
+</div>
+{% if is_owner %}
+<span class="badge" style="border-radius:5px;">Créateur</span>
+{% else %}
+<button class="btn" style="width:auto; padding:6px 12px; margin:0;" onclick="toggleFollow()">{{ 'Suivi' if is_following else 'Follow' }}</button>
+{% endif %}
+</div>
+
+<div class="messages" id="msgBox">
+{% for m in msgs %}
+<div class="msg you" style="align-self:center; max-width:90%;">
+<b>{{ m.from_nom }}</b><br>
+{% if m.type == 'file' %}
+{% if m.msg.startswith('data:image') %}
+<img src="{{ m.msg }}" class="chat-img">
+{% elif m.msg.startswith('data:video') %}
+<video src="{{ m.msg }}" controls class="chat-video"></video>
+{% else %}
+<a href="{{ m.msg }}" target="_blank" style="color:inherit;">📄 Document</a>
+{% endif %}
+{% else %}
+{{ m.msg }}
+{% endif %}
+<div class="time">{{ m.time }}</div>
+</div>
+{% endfor %}
+</div>
+
+{% if is_owner %}
+<form class="send-box" id="sendForm">
+<label class="file-btn" title="Publier image, vidéo ou document">📎<input type="file" id="channelFileInput" accept="image/*,video/*,application/pdf,.doc,.docx" style="display:none;"></label>
+<input type="text" id="message" placeholder="Publier dans la chaîne..." class="input">
+<button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px;">➤</button>
+</form>
+{% endif %}
+
+<script>
+const socket = io("{{ central }}");
+const CHANNEL_ID = "{{ channel.id }}";
+const IS_OWNER = {{ 'true' if is_owner else 'false' }};
+const MY_CODE = "{{ my_code }}";
+
+socket.on('connect', ()=> socket.emit('join', {code: CHANNEL_ID}));
+
+if(IS_OWNER){
+    document.getElementById('sendForm').onsubmit = e => {
+        e.preventDefault();
+        const msg = document.getElementById('message').value;
+        if(!msg) return;
+        let t = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+        const data = { channel: CHANNEL_ID, from: MY_CODE, from_nom: "{{ my_nom }}", msg: msg, time: t, type: 'text' };
+        fetch('/publish_channel_msg', {
+            method:'POST',
+            headers:{'Content-Type':'application/json'},
+            body: JSON.stringify(data)
+        }).then(()=> location.reload());
+    };
+
+    document.getElementById('channelFileInput').onchange = e => {
+        const file = e.target.files[0]; if(!file) return;
+        const reader = new FileReader();
+        reader.onload = ev => {
+            let t = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+            const data = { channel: CHANNEL_ID, from: MY_CODE, from_nom: "{{ my_nom }}", msg: ev.target.result, time: t, type: 'file' };
+            fetch('/publish_channel_msg', {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body: JSON.stringify(data)
+            }).then(()=> location.reload());
+        };
+        reader.readAsDataURL(file);
+    };
+}
+
+function toggleFollow(){
+    fetch('/toggle_follow_channel', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ channel_id: CHANNEL_ID })
+    }).then(()=> location.reload());
+}
+</script>
+</body></html>"""
+
 def get_user():
     code = session.get('code')
     db = load_db()
     return code, db["USERS"].get(code), db
 
-@app.route('/')
 def login():
     code, user, db = get_user()
     theme = get_user_settings(code, db)["theme"] if code else "noir"
     if user: return render_template_string(LOGIN_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(theme), code=code, nom=user['nom'])
     return render_template_string(LOGIN_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(theme), code=None, nom=None)
+
+@app.route('/')
+def index():
+    return login()
 
 @app.route('/register', methods=['GET','POST'])
 def register():
@@ -709,7 +1155,7 @@ def update_chat_bg():
             bg = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
             db["SETTINGS"][code]["chat_bg"] = bg
     save_db(db); return redirect('/settings')
-
+    
 @app.route('/logout')
 def logout(): session.pop('code', None); return redirect('/')
 
@@ -841,6 +1287,164 @@ def delete_msg():
         else:
             db["GROUP_MSGS"][data['group']] = [m for m in db["GROUP_MSGS"].get(data['group'],[]) if m['id']!=data['id']]
     save_db(db); return jsonify({"status":"ok"})
+
+# --- ROUTES DÉDIÉES AUX NOUVELLES FONCTIONNALITÉS (STATUTS ET CHAÎNES) ---
+
+@app.route('/statuses')
+def statuses():
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    cleanup_statuses(db)
+    settings = get_user_settings(code, db)
+    
+    # Récupération des statuts des contacts + du mien
+    relevant_codes = user.get('contacts', []) + [code]
+    contact_statuses = {}
+    
+    for status_id, st in db["STATUSES"].items():
+        u_code = st.get('user_code')
+        if u_code in relevant_codes:
+            if u_code not in contact_statuses:
+                u_info = db["USERS"].get(u_code, {"nom": u_code, "photo": ""})
+                u_info["initial"] = '' if u_info.get('photo') else avatar_letter(u_info.get('nom'))
+                contact_statuses[u_code] = {"user": u_info, "list": []}
+            contact_statuses[u_code]["list"].append(st)
+
+    return render_template_string(STATUSES_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), contact_statuses=contact_statuses, my_code=code)
+
+@app.route('/publish_status', methods=['POST'])
+def publish_status():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    status_id = "st_" + str(int(time.time() * 1000))
+    new_status = {
+        "id": status_id,
+        "user_code": code,
+        "media": data.get("media"),
+        "type": data.get("type"),
+        "text_overlay": data.get("text_overlay", ""),
+        "timestamp": time.time()
+    }
+    db["STATUSES"][status_id] = new_status
+    save_db(db)
+    return jsonify({"status":"ok", "id": status_id})
+
+@app.route('/comment_status', methods=['POST'])
+def comment_status():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    status_id = data.get('status_id')
+    owner_code = data.get('owner_code')
+    comment = data.get('comment')
+    
+    comment_entry = {
+        "from": code,
+        "comment": comment,
+        "time": datetime.now().strftime("%H:%M")
+    }
+    
+    if owner_code not in db["STATUS_COMMENTS"]:
+        db["STATUS_COMMENTS"][owner_code] = []
+    db["STATUS_COMMENTS"][owner_code].append(comment_entry)
+    save_db(db)
+    return jsonify({"status":"ok"})
+
+@app.route('/status_comments_page')
+def status_comments_page():
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    comments = db["STATUS_COMMENTS"].get(code, [])
+    return render_template_string(STATUS_COMMENTS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), comments=comments, users=db["USERS"])
+
+@app.route('/explore_statuses')
+def explore_statuses():
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    cleanup_statuses(db)
+    all_statuses = list(db["STATUSES"].values())
+    random.shuffle(all_statuses)
+    return render_template_string(EXPLORE_STATUSES_HTML, CSS_BASE=CSS_BASE, THEME_CSS="", explore_statuses=all_statuses, users=db["USERS"])
+
+@app.route('/channels')
+def channels():
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    ch_list = list(db["CHANNELS"].values())
+    return render_template_string(CHANNELS_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), channels=ch_list)
+
+@app.route('/create_channel', methods=['POST'])
+def create_channel():
+    code, user, db = get_user()
+    if not code: return jsonify({"status":"error"}), 403
+    data = request.json
+    ch_id = gen_code_port()
+    db["CHANNELS"][ch_id] = {
+        "id": ch_id,
+        "name": data.get("name"),
+        "photo": data.get("photo", ""),
+        "owner": code,
+        "followers": [code],
+        "visitors": 0
+    }
+    db["CHANNEL_MSGS"][ch_id] = []
+    save_db(db)
+    return jsonify({"status":"ok", "id": ch_id})
+
+@app.route('/channel/<ch_id>')
+def channel_view(ch_id):
+    code, user, db = get_user()
+    if not code: return redirect('/')
+    settings = get_user_settings(code, db)
+    ch = db["CHANNELS"].get(ch_id)
+    if not ch: return "Chaîne introuvable", 404
+    
+    # Incrémentation des visiteurs si ce n'est pas le créateur
+    if code != ch["owner"]:
+        ch["visitors"] = ch.get("visitors", 0) + 1
+        save_db(db)
+        
+    is_owner = (code == ch["owner"])
+    is_following = code in ch.get("followers", [])
+    msgs = db["CHANNEL_MSGS"].get(ch_id, [])
+    
+    return render_template_string(CHANNEL_VIEW_HTML, CSS_BASE=CSS_BASE, THEME_CSS=get_theme_css(settings["theme"]), channel=ch, is_owner=is_owner, is_following=is_following, msgs=msgs, central=CENTRAL_SERVER, my_code=code, my_nom=user['nom'])
+
+@app.route('/publish_channel_msg', methods=['POST'])
+def publish_channel_msg():
+    code, user, db = get_user()
+    data = request.json
+    ch_id = data.get('channel')
+    ch = db["CHANNELS"].get(ch_id)
+    if not ch or ch['owner'] != code:
+        return jsonify({"status":"error"}), 403
+        
+    if ch_id not in db["CHANNEL_MSGS"]:
+        db["CHANNEL_MSGS"][ch_id] = []
+        
+    db["CHANNEL_MSGS"][ch_id].append(data)
+    save_db(db)
+    socketio.emit('receive_channel_message', data, room=ch_id)
+    return jsonify({"status":"ok"})
+
+@app.route('/toggle_follow_channel', methods=['POST'])
+def toggle_follow_channel():
+    code, user, db = get_user()
+    data = request.json
+    ch_id = data.get('channel_id')
+    ch = db["CHANNELS"].get(ch_id)
+    if ch:
+        if code in ch["followers"]:
+            ch["followers"].remove(code)
+        else:
+            ch["followers"].append(code)
+        save_db(db)
+    return jsonify({"status":"ok"})
+
+# --- GESTIONNAIRES WEBSOCKET ---
 
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
