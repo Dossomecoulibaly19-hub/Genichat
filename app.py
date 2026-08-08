@@ -1459,16 +1459,14 @@ def handle_send(data):
     dest = data['to']
     src = data['from']
     if dest not in db["UNREAD"]: db["UNREAD"][dest] = {}
-    if src not in db["UNREAD"][dest]: db["UNREAD"][dest][src] = 0
-    db["UNREAD"][dest][src] += 1
+    db["UNREAD"][dest][src] = db["UNREAD"][dest].get(src, 0) + 1
 
     save_db(db)
-
     emit('receive_message', data, room=dest)
     emit('new_message_alert', {}, room=dest)
 
 @socketio.on('send_group_message')
-def handle_group_send(data):
+def handle_send_group(data):
     db = load_db()
     g_id = data['group']
     if g_id not in db["GROUP_MSGS"]: db["GROUP_MSGS"][g_id] = []
@@ -1476,6 +1474,5 @@ def handle_group_send(data):
     save_db(db)
     emit('receive_group_message', data, room=g_id)
 
-if __name__=='__main__':
-    port = int(os.environ.get("PORT", 10000))
-    socketio.run(app,host='0.0.0.0',port=port)
+if __name__ == '__main__':
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True)
