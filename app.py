@@ -25,6 +25,7 @@ def load_db():
         else:
             db = {}
         
+        # Initialisation par défaut pour rétrocompatibilité
         if "USERS" not in db: db["USERS"] = {}
         if "MESSAGES" not in db: db["MESSAGES"] = {}
         if "UNREAD" not in db: db["UNREAD"] = {}
@@ -58,10 +59,12 @@ def gen_code_port():
             return code
 
 def cleanup_statuses(db):
+    """ Supprime automatiquement les statuts de plus de 24h """
     now = time.time()
     twenty_four_hours = 24 * 3600
     modified = False
     
+    # Nettoyage des statuts
     for status_id in list(db["STATUSES"].keys()):
         status = db["STATUSES"][status_id]
         if now - status.get("timestamp", 0) > twenty_four_hours:
@@ -129,6 +132,7 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .chat-img {max-width:220px; max-height:220px; object-fit:cover; border-radius:8px; cursor:pointer; margin-top:4px;}
 .chat-video {max-width:220px; max-height:220px; border-radius:8px; cursor:pointer; margin-top:4px;}
 
+/* NOUVELLES EXTENSIONS CSS POUR STATUTS ET CHAÎNES */
 .nav-tabs {display:flex; background:#202C33; border-bottom:1px solid #2A3942; position:sticky; top:60px; z-index:9;}
 .tab-item {flex:1; padding:12px; text-align:center; color:#8696A0; text-decoration:none; font-weight:bold; font-size:14px; border-bottom:3px solid transparent;}
 .tab-item.active {color:#00A884; border-bottom:3px solid #00A884;}
@@ -136,7 +140,6 @@ label {display:block; margin-top:5px; font-size:14px; color:#8696A0;}
 .tiktok-slide {height:100vh; width:100vw; snap-align:start; scroll-snap-align:start; position:relative; display:flex; justify-content:center; align-items:center;}
 .tiktok-media {max-width:100%; max-height:100%; object-fit:contain;}
 .tiktok-overlay {position:absolute; bottom:20px; left:20px; right:20px; color:white; text-shadow:0 1px 3px rgba(0,0,0,0.8);}
-.checkbox-item {display:flex; align-items:center; gap:10px; margin:8px 0; text-align:left;}
 """
 
 def avatar_letter(nom):
@@ -318,20 +321,11 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <input name="code_ami" placeholder="Entrer CODE de l'ami" class="input" required><button class="btn" style="width:80px;">Créer</button></form></div>
 </div>
 
-<!-- Modal Sélection Multi-contacts pour Groupe -->
 <div class="popup" id="groupPopup">
-<div class="popup-box" style="max-height:80vh; overflow-y:auto;">
+<div class="popup-box">
 <h3>Créer un Groupe</h3>
 <input id="groupName" class="input" placeholder="Nom du groupe">
-<p style="color:#8696A0; font-size:12px; margin:10px 0;">Coche les membres à ajouter :</p>
-<div id="groupContactsChecklist" style="max-height:200px; overflow-y:auto; margin-bottom:15px;">
-{% for c in contacts %}
-<div class="checkbox-item">
-<input type="checkbox" id="chk_{{ c }}" value="{{ c }}" class="group-contact-checkbox">
-<label for="chk_{{ c }}">{{ users[c].nom }} ({{ c }})</label>
-</div>
-{% endfor %}
-</div>
+<p style="color:#8696A0; font-size:12px;">Sélectionne les contacts puis valide</p>
 <div class="popup-buttons">
 <button class="btn btn-gray" onclick="closeGroupPopup()">Annuler</button>
 <button class="btn" onclick="createGroup()">Créer</button>
@@ -352,26 +346,24 @@ CONTACTS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 
 <script>
 const socket=io("{{ central }}"); const MY_CODE="{{ my_code }}";
-let selectedContacts = []; let longPressTimer; let isSelecting = false;
+let selectedContacts = []; let longPressTimer; let isSelecting = false; let groupMode = false;
 
 socket.emit('join',{code:MY_CODE});
 
-function openCreateGroup(){ document.getElementById('groupPopup').style.display='flex'; }
+function openCreateGroup(){ groupMode=true; alert("Sélectionne les membres du groupe"); }
 function closeGroupPopup(){ document.getElementById('groupPopup').style.display='none'; }
 function createGroup(){
     let name = document.getElementById('groupName').value;
-    let selected = [];
-    document.querySelectorAll('.group-contact-checkbox:checked').forEach(cb => { selected.push(cb.value); });
-    if(!name || selected.length === 0){ alert("Entrez un nom et cochez au moins 1 contact"); return; }
-    fetch('/create_group', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, members:selected})})
+    if(!name || selectedContacts.length<2){ alert("Nom + 2 membres minimum"); return; }
+    fetch('/create_group', {method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({name, members:selectedContacts})})
   .then(r=>r.json()).then(res=>{ if(res.status=='ok'){ location.href='/group/'+res.id } });
 }
 
-function startLongPress(code){ longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
+function startLongPress(code){ if(groupMode){ selectContact(code); return; } longPressTimer = setTimeout(()=>{ enterSelectionMode(code); }, 600); }
 function endLongPress(){ clearTimeout(longPressTimer); }
 function enterSelectionMode(code){ isSelecting = true; selectContact(code); }
-function selectContact(code){ const el = document.querySelector(`[data-code="${code}"]`); if(!el) return; if(selectedContacts.includes(code)){ selectedContacts = selectedContacts.filter(c=>c!=code); el.classList.remove('selected'); } else { selectedContacts.push(code); el.classList.add('selected'); } updateSelectionHeader(); }
-function updateSelectionHeader(){ if(selectedContacts.length > 0){ document.getElementById('mainHeader').style.display='none'; document.getElementById('selectionHeader').style.display='flex'; document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné'; } }
+function selectContact(code){ const el = document.querySelector(`[data-code="${code}"]`); if(!el) return; if(selectedContacts.includes(code)){ selectedContacts = selectedContacts.filter(c=>c!=code); el.classList.remove('selected'); } else { selectedContacts.push(code); el.classList.add('selected'); } updateSelectionHeader(); if(groupMode && selectedContacts.length>=2){ document.getElementById('groupPopup').style.display='flex'; } }
+function updateSelectionHeader(){ if(selectedContacts.length > 0 &&!groupMode){ document.getElementById('mainHeader').style.display='none'; document.getElementById('selectionHeader').style.display='flex'; document.getElementById('selectedCount').innerText = selectedContacts.length + ' sélectionné'; } }
 function exitSelection(){ isSelecting = false; selectedContacts = []; document.querySelectorAll('.contact.selected').forEach(el=>el.classList.remove('selected')); document.getElementById('mainHeader').style.display='flex'; document.getElementById('selectionHeader').style.display='none'; }
 function confirmDelete(){ document.getElementById('deleteText').innerText = `Supprimer ${selectedContacts.length} contact(s)?`; document.getElementById('deletePopup').style.display='flex'; }
 function closePopup(){ document.getElementById('deletePopup').style.display='none'; }
@@ -380,15 +372,17 @@ function archiveSelected(){ fetch('/archive_contacts', {method: 'POST', headers:
 
 document.querySelectorAll('.contact').forEach(el=>{
   el.addEventListener('click', ()=>{
-    if(!isSelecting){ if(el.dataset.code) location.href='/chat/'+el.dataset.code; }
+    if(!isSelecting &&!groupMode){ location.href='/chat/'+el.dataset.code; }
     else { selectContact(el.dataset.code); }
   });
 });
 
+function sendToApp(data){ if(window.Android){ Android.saveMessage(JSON.stringify(data)); } }
 function syncMessages(){
   {% for c in contacts %}
   fetch('/get_msg/{{ c }}').then(r=>r.json()).then(msgs=>{
     localStorage.setItem('chat_{{ my_code }}_{{ c }}', JSON.stringify(msgs));
+    msgs.forEach(m => sendToApp({contact:'{{ c }}', message:m.msg, heure:m.time, envoyeur:m.from}));
   });
   {% endfor %}
 }
@@ -451,51 +445,31 @@ function openViewer(src, type){
 function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; const v=document.getElementById('viewerVideo'); v.pause(); v.src=''; }
 function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
 document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
+function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
+function deleteForAll(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'all'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
 
-function saveLocalMsg(data){
-    let local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    if(!local.some(m => m.id === data.id)){
-        local.push(data);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-    }
-}
-function loadLocalMsgs(){ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-
+function saveLocal(msgs){ localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs)); }
+function loadLocal(){ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
 function render(msgs){
   document.getElementById('msgBox').innerHTML='';
   msgs.forEach(m=>addMsg(m.from_nom,m.msg,m.from==MY_CODE,m.time,m.status,m.id,m.type));
   scroll();
 }
-
 function load(){
-  let localMsgs = loadLocalMsgs();
+  let localMsgs = loadLocal();
   if(localMsgs.length > 0) render(localMsgs);
   fetch('/get_msg/'+AMI_CODE).then(r=>r.json()).then(serverMsgs=>{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(serverMsgs));
-    render(serverMsgs);
+    if(JSON.stringify(serverMsgs)!== JSON.stringify(localMsgs)){
+      saveLocal(serverMsgs); render(serverMsgs);
+    }
   }).catch(()=>{});
 }
 load();
 
 function sendData(data){
-  saveLocalMsg(data);
+  let local = loadLocal(); local.push(data); saveLocal(local);
   addMsg(data.from_nom,data.msg,true,data.time,data.status,data.id,data.type); scroll();
   socket.emit('send_message',data);
-}
-
-function deleteForMe(){ 
-    fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'me'})}).then(()=>{
-        let local = loadLocalMsgs().filter(m => m.id !== selectedMsgId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-        document.getElementById(selectedMsgId).remove();
-    });
-}
-function deleteForAll(){ 
-    fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'pv', ami:AMI_CODE, mode:'all'})}).then(()=>{
-        let local = loadLocalMsgs().filter(m => m.id !== selectedMsgId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-        document.getElementById(selectedMsgId).remove();
-    });
 }
 
 sendBtn.onclick=e=>{e.preventDefault();const msg=msgInput.value;if(!msg)return;
@@ -552,7 +526,6 @@ micBtn.onclick = async () => {
 };
 
 function addMsg(from,msg,me,time,status,id,type='text'){
-  if(document.getElementById(id)) return;
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
   let check = me? (status=='read'?'<span class="check blue">✓</span>':'<span class="check gray">✓</span>') : '';
   let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-video" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank" style="color:inherit;">📎 Fichier</a>`) : msg;
@@ -561,7 +534,7 @@ function addMsg(from,msg,me,time,status,id,type='text'){
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
 socket.on('receive_message',d=>{
     if(d.from==AMI_CODE){
-      saveLocalMsg(d);
+      let local = loadLocal(); local.push(d); saveLocal(local);
       addMsg(d.from_nom,d.msg,false,d.time,'read',d.id,d.type);scroll();
     }
 });
@@ -595,7 +568,6 @@ GROUP_CHAT_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="w
 
 <script>
 const socket=io("{{ central }}");const MY_CODE="{{ my_code }}";const GROUP_ID="{{ group.id }}";
-const STORAGE_KEY = `group_${MY_CODE}_${GROUP_ID}`;
 let selectedMsgId = null; let mediaRecorder, audioChunks = []; let isRecording = false;
 const micBtn = document.getElementById('micBtn');
 const sendBtn = document.getElementById('sendBtn');
@@ -612,49 +584,19 @@ function openViewer(src, type){
 function closeViewer(){ document.getElementById('mediaViewer').style.display='none'; const v=document.getElementById('viewerVideo'); v.pause(); v.src=''; }
 function showContextMenu(e, msgId){ e.preventDefault(); selectedMsgId=msgId; const menu=document.getElementById('contextMenu'); menu.style.display='block'; menu.style.left=e.pageX+'px'; menu.style.top=e.pageY+'px'; }
 document.addEventListener('click', ()=>{ document.getElementById('contextMenu').style.display='none'; })
+function deleteForMe(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'me'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
+function deleteForAll(){ fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'all'})}).then(()=>document.getElementById(selectedMsgId).remove()); }
 
-function saveLocalGroupMsg(data){
-    let local = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    if(!local.some(m => m.id === data.id)){
-        local.push(data);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-    }
-}
-function loadLocalGroupMsgs(){ return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
-
-function renderGroup(msgs){
+function loadGroup(){
+  fetch('/get_group_msgs/'+GROUP_ID).then(r=>r.json()).then(msgs=>{
     document.getElementById('msgBox').innerHTML='';
     msgs.forEach(m=>addMsg(m.from_nom,m.msg,m.from==MY_CODE,m.time,m.id,m.type));
     scroll();
-}
-
-function loadGroup(){
-  let localMsgs = loadLocalGroupMsgs();
-  if(localMsgs.length > 0) renderGroup(localMsgs);
-  fetch('/get_group_msgs/'+GROUP_ID).then(r=>r.json()).then(serverMsgs=>{
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(serverMsgs));
-    renderGroup(serverMsgs);
   });
 }
 loadGroup();
 
-function deleteForMe(){ 
-    fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'me'})}).then(()=>{
-        let local = loadLocalGroupMsgs().filter(m => m.id !== selectedMsgId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-        document.getElementById(selectedMsgId).remove();
-    });
-}
-function deleteForAll(){ 
-    fetch('/delete_msg', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:selectedMsgId, type:'group', group:GROUP_ID, mode:'all'})}).then(()=>{
-        let local = loadLocalGroupMsgs().filter(m => m.id !== selectedMsgId);
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(local));
-        document.getElementById(selectedMsgId).remove();
-    });
-}
-
 function sendData(data){
-  saveLocalGroupMsg(data);
   addMsg(data.from_nom,data.msg,true,data.time,data.id,data.type); scroll();
   socket.emit('send_group_message',data);
 }
@@ -711,13 +653,12 @@ micBtn.onclick = async () => {
 };
 
 function addMsg(from,msg,me,time,id,type='text'){
-  if(document.getElementById(id)) return;
   let d=document.createElement('div');d.id=id;d.className='msg '+(me?'me':'you'); d.oncontextmenu=(e)=>showContextMenu(e,id);
   let content = type=='audio'? `<audio controls class="audio-player" src="${msg}"></audio>` : type=='file'? (msg.startsWith('data:image')? `<img src="${msg}" class="chat-img" onclick="openViewer('${msg}','image')">` : msg.startsWith('data:video')? `<video src="${msg}" class="chat-video" onclick="openViewer('${msg}','video')"></video>` : `<a href="${msg}" target="_blank">📎 Fichier</a>`) : msg;
   d.innerHTML=`<b>${from}</b><br>${content}<div class="time">${time}</div>`;document.getElementById('msgBox').append(d);
 }
 function scroll(){let box=document.getElementById('msgBox');box.scrollTop=box.scrollHeight;}
-socket.on('receive_group_message',d=>{ if(d.group==GROUP_ID && d.from !== MY_CODE){ saveLocalGroupMsg(d); addMsg(d.from_nom,d.msg,false,d.time,d.id,d.type);scroll(); } });
+socket.on('receive_group_message',d=>{ if(d.group==GROUP_ID){ addMsg(d.from_nom,d.msg,false,d.time,d.id,d.type);scroll(); } });
 
 function changeGroupBg(){
     let input = document.createElement('input'); input.type='file'; input.accept='image/*';
@@ -768,6 +709,7 @@ STATUSES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 <a href="/explore_statuses" class="btn btn-gray" style="display:flex; align-items:center; justify-content:center; gap:8px;">🔍 Explorer les statuts (TikTok)</a>
 </div>
 
+<!-- Modal d'édition de Statut (Image / Vidéo, Stickers, Texte, Découpage) -->
 <div class="crop-modal" id="statusEditorModal" style="z-index:200;">
 <div style="position:absolute; top:15px; left:15px; right:15px; display:flex; justify-content:space-between; z-index:205;">
 <button class="btn btn-gray" style="width:auto; margin:0;" onclick="closeStatusEditor()">✕</button>
@@ -791,6 +733,7 @@ STATUSES_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 </div>
 </div>
 
+<!-- Modal de Visionnement de Statut -->
 <div class="media-viewer" id="statusViewerModal" style="z-index:300;">
 <div style="position:absolute; top:15px; left:15px; right:15px; display:flex; justify-content:space-between; color:white; align-items:center; z-index:305;">
 <b id="viewerUserNom">Nom</b>
@@ -977,6 +920,7 @@ CHANNELS_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content="wid
 {% endfor %}
 </div>
 
+<!-- Modal Configuration Création de Chaîne -->
 <div class="popup" id="configChannelPopup">
 <div class="popup-box">
 <h3>Configurer la Chaîne</h3>
@@ -1071,13 +1015,9 @@ CHANNEL_VIEW_HTML = """<!DOCTYPE html><html><head><meta name="viewport" content=
 {% if is_owner %}
 <form class="send-box" id="sendForm">
 <label class="file-btn" title="Publier image, vidéo ou document">📎<input type="file" id="channelFileInput" accept="image/*,video/*,application/pdf,.doc,.docx" style="display:none;"></label>
-<input type="text" id="message" placeholder="Publier texte, image ou vidéo..." class="input">
+<input type="text" id="message" placeholder="Publier dans la chaîne..." class="input">
 <button id="sendBtn" class="btn" style="border-radius:50%; width:48px; height:48px; padding:0; font-size:20px;">➤</button>
 </form>
-{% else %}
-<div class="send-box" style="justify-content:center; background:#202C33; color:#8696A0; font-size:14px; padding:15px;">
-🔒 Seul le créateur peut écrire dans cette chaîne
-</div>
 {% endif %}
 
 <script>
@@ -1348,6 +1288,8 @@ def delete_msg():
             db["GROUP_MSGS"][data['group']] = [m for m in db["GROUP_MSGS"].get(data['group'],[]) if m['id']!=data['id']]
     save_db(db); return jsonify({"status":"ok"})
 
+# --- ROUTES DÉDIÉES AUX NOUVELLES FONCTIONNALITÉS (STATUTS ET CHAÎNES) ---
+
 @app.route('/statuses')
 def statuses():
     code, user, db = get_user()
@@ -1355,6 +1297,7 @@ def statuses():
     cleanup_statuses(db)
     settings = get_user_settings(code, db)
     
+    # Récupération des statuts des contacts + du mien
     relevant_codes = user.get('contacts', []) + [code]
     contact_statuses = {}
     
@@ -1459,6 +1402,7 @@ def channel_view(ch_id):
     ch = db["CHANNELS"].get(ch_id)
     if not ch: return "Chaîne introuvable", 404
     
+    # Incrémentation des visiteurs si ce n'est pas le créateur
     if code != ch["owner"]:
         ch["visitors"] = ch.get("visitors", 0) + 1
         save_db(db)
@@ -1499,6 +1443,8 @@ def toggle_follow_channel():
             ch["followers"].append(code)
         save_db(db)
     return jsonify({"status":"ok"})
+
+# --- GESTIONNAIRES WEBSOCKET ---
 
 @socketio.on('join')
 def on_join(data): join_room(data['code'])
