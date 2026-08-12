@@ -17,69 +17,6 @@ CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
 db_lock = threading.Lock()
 
-# Configuration CORS globale pour le contrôle à distance par Singulateur
-@app.after_request
-def apply_cors(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-    return response
-
-@app.route('/remote_control', methods=['OPTIONS'])
-def remote_options():
-    return '', 200
-
-# Endpoint pour permettre au site Singulateur de contrôler ce serveur à distance
-@app.route('/remote_control', methods=['POST'])
-def remote_control():
-    data = request.json or {}
-    action = data.get('action')
-    payload = data.get('payload', {})
-    db = load_db()
-
-    if action == 'ping':
-        return jsonify({"status": "ok", "message": "Serveur GenieChat prêt à être contrôlé par Singulateur."})
-
-    elif action == 'get_users':
-        return jsonify({"status": "ok", "users": db.get("USERS", {})})
-
-    elif action == 'send_remote_message':
-        to_code = payload.get('to')
-        from_code = payload.get('from', 'SINGULATEUR')
-        msg = payload.get('msg', '')
-        if not to_code or not msg:
-            return jsonify({"status": "error", "message": "Champs 'to' et 'msg' requis."}), 400
-        
-        t = datetime.now().strftime("%H:%M")
-        msg_id = 'remote_' + str(int(time.time() * 1000))
-        data_msg = {
-            "to": to_code,
-            "from": from_code,
-            "from_nom": payload.get('from_nom', 'Singulateur Remote'),
-            "msg": msg,
-            "time": t,
-            "id": msg_id,
-            "type": payload.get('type', 'text'),
-            "status": "sent"
-        }
-        pair_key = "-".join(sorted([from_code, to_code]))
-        if pair_key not in db["MESSAGES"]: db["MESSAGES"][pair_key] = []
-        db["MESSAGES"][pair_key].append(data_msg)
-        
-        if to_code not in db["UNREAD"]: db["UNREAD"][to_code] = {}
-        db["UNREAD"][to_code][from_code] = db["UNREAD"][to_code].get(from_code, 0) + 1
-        save_db(db)
-        
-        socketio.emit('receive_message', data_msg, room=to_code)
-        socketio.emit('new_message_alert', {}, room=to_code)
-        return jsonify({"status": "ok", "message_id": msg_id})
-
-    elif action == 'exec_custom':
-        # Hook pour d'autres commandes spécifiques à Singulateur
-        return jsonify({"status": "ok", "message": "Commande exécutée avec succès.", "data": payload})
-
-    return jsonify({"status": "error", "message": "Action non reconnue."}), 400
-
 def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
