@@ -17,6 +17,69 @@ CENTRAL_SERVER = "https://genie-facteur.onrender.com"
 DB_FILE = "genie_db.json"
 db_lock = threading.Lock()
 
+# Configuration CORS globale pour le contrôle à distance par Singulateur
+@app.after_request
+def apply_cors(response):
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+    return response
+
+@app.route('/remote_control', methods=['OPTIONS'])
+def remote_options():
+    return '', 200
+
+# Endpoint pour permettre au site Singulateur de contrôler ce serveur à distance
+@app.route('/remote_control', methods=['POST'])
+def remote_control():
+    data = request.json or {}
+    action = data.get('action')
+    payload = data.get('payload', {})
+    db = load_db()
+
+    if action == 'ping':
+        return jsonify({"status": "ok", "message": "Serveur GenieChat prêt à être contrôlé par Singulateur."})
+
+    elif action == 'get_users':
+        return jsonify({"status": "ok", "users": db.get("USERS", {})})
+
+    elif action == 'send_remote_message':
+        to_code = payload.get('to')
+        from_code = payload.get('from', 'SINGULATEUR')
+        msg = payload.get('msg', '')
+        if not to_code or not msg:
+            return jsonify({"status": "error", "message": "Champs 'to' et 'msg' requis."}), 400
+        
+        t = datetime.now().strftime("%H:%M")
+        msg_id = 'remote_' + str(int(time.time() * 1000))
+        data_msg = {
+            "to": to_code,
+            "from": from_code,
+            "from_nom": payload.get('from_nom', 'Singulateur Remote'),
+            "msg": msg,
+            "time": t,
+            "id": msg_id,
+            "type": payload.get('type', 'text'),
+            "status": "sent"
+        }
+        pair_key = "-".join(sorted([from_code, to_code]))
+        if pair_key not in db["MESSAGES"]: db["MESSAGES"][pair_key] = []
+        db["MESSAGES"][pair_key].append(data_msg)
+        
+        if to_code not in db["UNREAD"]: db["UNREAD"][to_code] = {}
+        db["UNREAD"][to_code][from_code] = db["UNREAD"][to_code].get(from_code, 0) + 1
+        save_db(db)
+        
+        socketio.emit('receive_message', data_msg, room=to_code)
+        socketio.emit('new_message_alert', {}, room=to_code)
+        return jsonify({"status": "ok", "message_id": msg_id})
+
+    elif action == 'exec_custom':
+        # Hook pour d'autres commandes spécifiques à Singulateur
+        return jsonify({"status": "ok", "message": "Commande exécutée avec succès.", "data": payload})
+
+    return jsonify({"status": "error", "message": "Action non reconnue."}), 400
+
 def load_db():
     with db_lock:
         if os.path.exists(DB_FILE):
@@ -1368,103 +1431,100 @@ def chat(code_ami):
         db["UNREAD"][code][code_ami] = 0; save_db(db)
     
     ami = db["USERS"].get(code_ami)
-    if not ami: return "Utilisateur non trouvé", 404
+    if not ami: return "Ami non trouvé", 404
+
+    initial = '' if ami['photo'] else avatar_letter(ami['nom'])
+    ami_info = {"nom": ami['nom'], "photo": ami['photo'], "initial": initial}
     
-    ami_data = {
-        "nom": ami['nom'],
-        "photo": ami['photo'],
-        "initial": avatar_letter(ami['nom']) if not ami['photo'] else ''
-    }
-    chat_bg = settings.get("chat_bg", "")
     return render_template_string(
         CHAT_HTML,
         CSS_BASE=CSS_BASE,
         THEME_CSS=get_theme_css(settings["theme"]),
-        ami=ami_data,
+        ami=ami_info,
         code_ami=code_ami,
         my_code=code,
         my_nom=user['nom'],
-        chat_bg=chat_bg,
+        chat_bg=settings.get("chat_bg", ""),
         central=CENTRAL_SERVER
     )
+
+# --- ROUTES & GESTION GROUPES, STATUTS, CHAÎNES, MESSAGES ---
 
 @app.route('/get_msg/<code_ami>')
 def get_msg(code_ami):
     code, user, db = get_user()
-    if not code: return jsonify([]), 403
-    pair_key = "_".join(sorted([code, code_ami]))
+    if not code: return jsonify([])
+    pair_key = "-".join(sorted([code, code_ami]))
     msgs = db["MESSAGES"].get(pair_key, [])
     return jsonify(msgs)
 
 @app.route('/delete_msg', methods=['POST'])
 def delete_msg():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
     msg_id = data.get('id')
-    mode = data.get('mode')
+    mode = data.get('mode') # 'me' ou 'all'
+    code_ami = data.get('ami')
     
-    if data.get('type') == 'pv':
-        ami = data.get('ami')
-        pair_key = "_".join(sorted([code, ami]))
-        if pair_key in db["MESSAGES"]:
-            if mode == 'all':
-                db["MESSAGES"][pair_key] = [m for m in db["MESSAGES"][pair_key] if m.get('id') != msg_id]
-            save_db(db)
-    return jsonify({"status": "ok"})
+    pair_key = "-".join(sorted([code, code_ami]))
+    if pair_key in db["MESSAGES"]:
+        if mode == 'all':
+            db["MESSAGES"][pair_key] = [m for m in db["MESSAGES"][pair_key] if m.get('id') != msg_id]
+        save_db(db)
+    return jsonify({"status":"ok"})
 
 @app.route('/create_group', methods=['POST'])
 def create_group():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    group_id = gen_code_port()
+    group_id = "GRP_" + gen_code_port()
     members = list(set(data.get('members', []) + [code]))
     
     db["GROUPS"][group_id] = {
         "id": group_id,
-        "name": data.get('name'),
+        "name": data.get('name', 'Groupe'),
         "photo": data.get('photo', ''),
-        "creator": code,
+        "owner": code,
         "members": members
     }
     db["GROUP_MSGS"][group_id] = []
     save_db(db)
-    return jsonify({"status": "ok", "id": group_id})
+    return jsonify({"status":"ok", "id": group_id})
 
 @app.route('/group/<group_id>')
 def group_chat(group_id):
     code, user, db = get_user()
     if not code: return redirect('/')
+    settings = get_user_settings(code, db)
     group = db["GROUPS"].get(group_id)
     if not group or code not in group['members']: return "Groupe introuvable ou accès refusé", 404
     
-    settings = get_user_settings(code, db)
+    all_contacts = user.get('contacts', [])
+    users_data = {}
+    for u_code, u_info in db["USERS"].items():
+        users_data[u_code] = {"nom": u_info['nom'], "photo": u_info.get('photo', '')}
+
     group_bg = settings.get("group_bg", {}).get(group_id, "")
     
-    users_data = {}
-    for m in group['members']:
-        u = db["USERS"].get(m, {})
-        users_data[m] = {"nom": u.get('nom', m), "photo": u.get('photo', '')}
-
-    all_contacts = user.get('contacts', [])
     return render_template_string(
         GROUP_CHAT_HTML,
         CSS_BASE=CSS_BASE,
         THEME_CSS=get_theme_css(settings["theme"]),
         group=group,
+        all_contacts=all_contacts,
+        users=users_data,
         my_code=code,
         my_nom=user['nom'],
         group_bg=group_bg,
-        users=users_data,
-        all_contacts=all_contacts,
         central=CENTRAL_SERVER
     )
 
 @app.route('/add_group_members', methods=['POST'])
 def add_group_members():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
     group_id = data.get('group_id')
     new_members = data.get('members', [])
@@ -1474,13 +1534,13 @@ def add_group_members():
             if m not in db["GROUPS"][group_id]['members']:
                 db["GROUPS"][group_id]['members'].append(m)
         save_db(db)
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 404
+        return jsonify({"status":"ok"})
+    return jsonify({"status":"error"}), 404
 
 @app.route('/get_group_msgs/<group_id>')
 def get_group_msgs(group_id):
     code, user, db = get_user()
-    if not code: return jsonify([]), 403
+    if not code: return jsonify([])
     msgs = db["GROUP_MSGS"].get(group_id, [])
     return jsonify(msgs)
 
@@ -1488,24 +1548,20 @@ def get_group_msgs(group_id):
 def statuses():
     code, user, db = get_user()
     if not code: return redirect('/')
-    cleanup_statuses(db)
     settings = get_user_settings(code, db)
+    cleanup_statuses(db)
     
+    contacts_list = user.get('contacts', []) + [code]
     contact_statuses = {}
-    relevant_codes = user.get('contacts', []) + [code]
     
-    for c in relevant_codes:
-        u = db["USERS"].get(c)
-        if not u: continue
-        st_list = [st for st in db["STATUSES"].values() if st.get('user_code') == c]
-        if st_list:
+    for c in contacts_list:
+        user_st = [st for st in db["STATUSES"].values() if st.get('user_code') == c]
+        if user_st:
+            u_info = db["USERS"].get(c, {"nom": "Inconnu", "photo": ""})
+            initial = '' if u_info.get('photo') else avatar_letter(u_info.get('nom'))
             contact_statuses[c] = {
-                "user": {
-                    "nom": u['nom'],
-                    "photo": u['photo'],
-                    "initial": avatar_letter(u['nom']) if not u['photo'] else ''
-                },
-                "list": st_list
+                "user": {"nom": u_info.get('nom'), "photo": u_info.get('photo'), "initial": initial},
+                "list": user_st
             }
 
     return render_template_string(
@@ -1518,9 +1574,9 @@ def statuses():
 @app.route('/publish_status', methods=['POST'])
 def publish_status():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    status_id = "st_" + str(int(time.time() * 1000))
+    status_id = "ST_" + str(int(time.time() * 1000))
     
     db["STATUSES"][status_id] = {
         "id": status_id,
@@ -1533,20 +1589,14 @@ def publish_status():
         "timestamp": time.time()
     }
     save_db(db)
-    return jsonify({"status": "ok"})
+    return jsonify({"status":"ok"})
 
 @app.route('/status_comments_page')
 def status_comments_page():
     code, user, db = get_user()
     if not code: return redirect('/')
     settings = get_user_settings(code, db)
-    
-    comments = []
-    my_status_ids = [st_id for st_id, st in db["STATUSES"].items() if st.get('user_code') == code]
-    for st_id in my_status_ids:
-        if st_id in db["STATUS_COMMENTS"]:
-            comments.extend(db["STATUS_COMMENTS"][st_id])
-            
+    comments = db["STATUS_COMMENTS"].get(code, [])
     return render_template_string(
         STATUS_COMMENTS_HTML,
         CSS_BASE=CSS_BASE,
@@ -1570,81 +1620,86 @@ def channels():
 @app.route('/create_channel', methods=['POST'])
 def create_channel():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
-    ch_id = gen_code_port()
+    ch_id = "CHN_" + gen_code_port()
     
     db["CHANNELS"][ch_id] = {
         "id": ch_id,
-        "name": data.get('name'),
+        "name": data.get('name', 'Chaîne'),
         "photo": data.get('photo', ''),
         "owner": code,
         "followers": [code]
     }
     db["CHANNEL_MSGS"][ch_id] = []
     save_db(db)
-    return jsonify({"status": "ok", "id": ch_id})
+    return jsonify({"status":"ok", "id": ch_id})
 
 @app.route('/channel/<channel_id>')
 def channel_view(channel_id):
     code, user, db = get_user()
     if not code: return redirect('/')
-    channel = db["CHANNELS"].get(channel_id)
-    if not channel: return "Chaîne introuvable", 404
-    
     settings = get_user_settings(code, db)
-    is_owner = (channel['owner'] == code)
-    is_following = code in channel.get('followers', [])
+    ch = db["CHANNELS"].get(channel_id)
+    if not ch: return "Chaîne introuvable", 404
+    
+    is_owner = (ch['owner'] == code)
+    is_following = (code in ch.get('followers', []))
     msgs = db["CHANNEL_MSGS"].get(channel_id, [])
     
     return render_template_string(
         CHANNEL_VIEW_HTML,
         CSS_BASE=CSS_BASE,
         THEME_CSS=get_theme_css(settings["theme"]),
-        channel=channel,
+        channel=ch,
         is_owner=is_owner,
         is_following=is_following,
         msgs=msgs,
         my_code=code,
-        my_nom=user['nom']
+        my_nom=user['nom'],
+        central=CENTRAL_SERVER
     )
 
 @app.route('/publish_channel_msg', methods=['POST'])
 def publish_channel_msg():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
     ch_id = data.get('channel')
+    ch = db["CHANNELS"].get(ch_id)
     
-    if ch_id in db["CHANNELS"] and db["CHANNELS"][ch_id]['owner'] == code:
+    if ch and ch['owner'] == code:
+        if ch_id not in db["CHANNEL_MSGS"]: db["CHANNEL_MSGS"][ch_id] = []
         db["CHANNEL_MSGS"][ch_id].append(data)
         save_db(db)
         socketio.emit('receive_channel_message', data, room=ch_id)
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 403
+        return jsonify({"status":"ok"})
+    return jsonify({"status":"error"}), 403
 
 @app.route('/toggle_follow_channel', methods=['POST'])
 def toggle_follow_channel():
     code, user, db = get_user()
-    if not code: return jsonify({"status": "error"}), 403
+    if not code: return jsonify({"status":"error"}), 403
     data = request.json
     ch_id = data.get('channel_id')
+    ch = db["CHANNELS"].get(ch_id)
     
-    if ch_id in db["CHANNELS"]:
-        followers = db["CHANNELS"][ch_id].setdefault('followers', [])
-        if code in followers:
-            followers.remove(code)
+    if ch:
+        if code in ch['followers']:
+            ch['followers'].remove(code)
         else:
-            followers.append(code)
+            ch['followers'].append(code)
         save_db(db)
-        return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 404
+        return jsonify({"status":"ok"})
+    return jsonify({"status":"error"}), 404
+
+# --- WEBSOCKET EVENT HANDLERS ---
 
 @socketio.on('join')
 def on_join(data):
-    code = data.get('code')
-    if code:
-        join_room(code)
+    room = data.get('code')
+    if room:
+        join_room(room)
 
 @socketio.on('send_message')
 def handle_send_message(data):
@@ -1652,18 +1707,14 @@ def handle_send_message(data):
     to_code = data.get('to')
     from_code = data.get('from')
     
-    pair_key = "_".join(sorted([from_code, to_code]))
-    if pair_key not in db["MESSAGES"]:
-        db["MESSAGES"][pair_key] = []
-        
+    pair_key = "-".join(sorted([from_code, to_code]))
+    if pair_key not in db["MESSAGES"]: db["MESSAGES"][pair_key] = []
     db["MESSAGES"][pair_key].append(data)
     
-    if to_code not in db["UNREAD"]:
-        db["UNREAD"][to_code] = {}
+    if to_code not in db["UNREAD"]: db["UNREAD"][to_code] = {}
     db["UNREAD"][to_code][from_code] = db["UNREAD"][to_code].get(from_code, 0) + 1
     
     save_db(db)
-    
     emit('receive_message', data, room=to_code)
     emit('new_message_alert', {}, room=to_code)
 
@@ -1672,8 +1723,7 @@ def handle_send_group_message(data):
     db = load_db()
     group_id = data.get('group')
     if group_id in db["GROUPS"]:
-        if group_id not in db["GROUP_MSGS"]:
-            db["GROUP_MSGS"][group_id] = []
+        if group_id not in db["GROUP_MSGS"]: db["GROUP_MSGS"][group_id] = []
         db["GROUP_MSGS"][group_id].append(data)
         save_db(db)
         emit('receive_group_message', data, room=group_id)
